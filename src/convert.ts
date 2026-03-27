@@ -15,6 +15,7 @@ const HTML_STRIP_PATTERNS: RegExp[] = [
   /<style[^>]*>[\s\S]*?<\/style>/g,
 ];
 
+const YOUTUBE_SRC_PATTERN = /(?:youtube\.com\/embed|youtu\.be)\/([a-zA-Z0-9_-]+)/;
 const LANGUAGE_CLASS_PATTERN = /^language-(.+)$/;
 const TRAILING_NEWLINE_PATTERN = /\n$/;
 const ARTICLE_PATTERN = /<article[^>]*>([\s\S]*?)<\/article>/;
@@ -192,6 +193,44 @@ function createTurndownService(): TurndownService {
         return "";
       }
       return `![${alt}](${src})`;
+    },
+  });
+
+  turndownService.addRule("youtubeIframe", {
+    filter(node) {
+      if (node.nodeName !== "IFRAME") {
+        return false;
+      }
+      const src = (node as HTMLElement).getAttribute("src") ?? "";
+      return YOUTUBE_SRC_PATTERN.test(src);
+    },
+    replacement(_content, node) {
+      const element = node as HTMLElement;
+      const src = element.getAttribute("src") ?? "";
+      const title = element.getAttribute("title") ?? "YouTube video";
+      const videoId = src.match(YOUTUBE_SRC_PATTERN)?.[1];
+      /* v8 ignore next 3 */
+      if (!videoId) {
+        return "";
+      }
+      return `[${title}](https://www.youtube.com/watch?v=${videoId})`;
+    },
+  });
+
+  turndownService.addRule("mermaidCodeBlock", {
+    filter(node) {
+      if (node.nodeName !== "CODE") {
+        return false;
+      }
+      return (node as HTMLElement).classList.contains("language-mermaid");
+    },
+    replacement(_content, node) {
+      const text = (node as HTMLElement).textContent ?? "";
+      /* v8 ignore next 3 */
+      if (!text.trim()) {
+        return "";
+      }
+      return `\n\n\`\`\`mermaid\n${text.trim()}\n\`\`\`\n\n`;
     },
   });
 

@@ -467,4 +467,66 @@ describe("htmlToMarkdown", () => {
     const result = htmlToMarkdown(html);
     expect(result).toContain("~~struck~~");
   });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // YouTube iframes
+  // ──────────────────────────────────────────────────────────────────────────
+
+  it("converts YouTube iframe to markdown link", () => {
+    const html = wrap(
+      '<iframe width="560" height="315" src="https://www.youtube.com/embed/xDTLGGewjNU?si=abc123" title="How to Create a Vested Airdrop"></iframe>'
+    );
+    const result = htmlToMarkdown(html);
+    expect(result).toBe(
+      "[How to Create a Vested Airdrop](https://www.youtube.com/watch?v=xDTLGGewjNU)"
+    );
+  });
+
+  it("uses default title for YouTube iframe without title attribute", () => {
+    const html = wrap('<iframe src="https://www.youtube.com/embed/abc123"></iframe>');
+    const result = htmlToMarkdown(html);
+    expect(result).toBe("[YouTube video](https://www.youtube.com/watch?v=abc123)");
+  });
+
+  it("ignores non-YouTube iframes", () => {
+    const html = wrap('<iframe src="https://example.com/embed/page"></iframe>');
+    const result = htmlToMarkdown(html);
+    expect(result).toBe("");
+  });
+
+  it("handles youtu.be short URLs in iframes", () => {
+    const html = wrap(
+      '<iframe src="https://youtu.be/xDTLGGewjNU" title="Short URL Video"></iframe>'
+    );
+    const result = htmlToMarkdown(html);
+    expect(result).toBe("[Short URL Video](https://www.youtube.com/watch?v=xDTLGGewjNU)");
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Mermaid code blocks
+  // ──────────────────────────────────────────────────────────────────────────
+
+  it("converts mermaid code blocks to fenced mermaid", () => {
+    const html = wrap(
+      '<code class="language-mermaid">sequenceDiagram\n  actor Sender\n  Sender ->> Lockup: create()</code>'
+    );
+    const result = htmlToMarkdown(html);
+    expect(result).toContain("```mermaid");
+    expect(result).toContain("sequenceDiagram");
+    expect(result).toContain("Sender ->> Lockup: create()");
+    expect(result).toContain("```");
+  });
+
+  it("skips empty mermaid code blocks", () => {
+    const html = wrap('<code class="language-mermaid">  </code>');
+    const result = htmlToMarkdown(html);
+    expect(result).toBe("");
+  });
+
+  it("does not affect non-mermaid code elements", () => {
+    const html = wrap("<code>regular code</code>");
+    const result = htmlToMarkdown(html);
+    expect(result).toContain("regular code");
+    expect(result).not.toContain("```mermaid");
+  });
 });

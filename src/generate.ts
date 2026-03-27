@@ -2,10 +2,12 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { htmlToMarkdown } from "./convert.js";
-import type { LlmfoodConfig, PageEntry } from "./types.js";
+import type { LlmfoodConfig, PageEntry, SkippedPage, SkipReason } from "./types.js";
 
 const H1_PATTERN = /<h1[^>]*>([\s\S]*?)<\/h1>/;
 const HTML_TAG_PATTERN = /<[^>]+>/g;
+const META_REFRESH_PATTERN =
+  /<meta[^>]*http-equiv=["']?refresh["']?[^>]*content=["']?\d+;\s*url=([^"'\s>]+)/i;
 
 function discoverPages(buildDir: string): string[] {
   const pages: string[] = [];
@@ -47,29 +49,55 @@ function extractTitle(html: string): string {
   return match?.[1]?.replace(HTML_TAG_PATTERN, "").trim() ?? "";
 }
 
-function processPage(buildDir: string, urlPath: string): PageEntry | null {
-  const htmlPath = path.join(buildDir, urlPath.slice(1), "index.html");
+function detectRedirect(html: string): string | undefined {
+  const match = html.match(META_REFRESH_PATTERN);
+  return match?.[1];
+}
+
+async function processPage(
+  config: LlmfoodConfig,
+  urlPath: string
+): Promise<PageEntry | SkippedPage> {
+  const htmlPath = path.join(config.buildDir, urlPath.slice(1), "index.html");
 
   if (!fs.existsSync(htmlPath)) {
     /* v8 ignore next */
-    return null;
+    return { reason: "no-file", urlPath };
   }
 
-  const html = fs.readFileSync(htmlPath, "utf-8");
+  let html = fs.readFileSync(htmlPath, "utf-8");
   const title = extractTitle(html);
 
-  const markdown = htmlToMarkdown(html);
-  if (!markdown) {
-    return null;
+  const redirectTarget = detectRedirect(html);
+  if (redirectTarget) {
+    return { reason: "redirect", redirectTarget, urlPath };
   }
 
-  const mdPath = path.join(buildDir, `${urlPath.slice(1)}.md`);
+  const context = { urlPath };
+  if (config.postProcessHtml) {
+    html = await config.postProcessHtml(html, context);
+  }
+
+  let markdown = htmlToMarkdown(html);
+  if (!markdown) {
+    return { reason: "empty", urlPath };
+  }
+
+  if (config.postProcessMarkdown) {
+    markdown = await config.postProcessMarkdown(markdown, context);
+  }
+
+  const mdPath = path.join(config.buildDir, `${urlPath.slice(1)}.md`);
   const mdDir = path.dirname(mdPath);
 
   fs.mkdirSync(mdDir, { recursive: true });
   fs.writeFileSync(mdPath, markdown, "utf-8");
 
   return { markdown, mdPath, title, urlPath };
+}
+
+function isPageEntry(result: PageEntry | SkippedPage): result is PageEntry {
+  return "markdown" in result;
 }
 
 function generateLlmsTxt(config: LlmfoodConfig, pages: PageEntry[]): void {
@@ -162,7 +190,43 @@ function generateCustomLlmsFiles(config: LlmfoodConfig, pages: PageEntry[]): voi
   }
 }
 
-export function generateLlmsMarkdown(config: LlmfoodConfig): void {
+function logSkipSummary(skipped: SkippedPage[], verbose: boolean): void {
+  if (skipped.length === 0) {
+    return;
+  }
+
+  const grouped = new Map<SkipReason, SkippedPage[]>();
+  for (const entry of skipped) {
+    const group = grouped.get(entry.reason);
+    if (group) {
+      group.push(entry);
+    } else {
+      grouped.set(entry.reason, [entry]);
+    }
+  }
+
+  const labels: Record<SkipReason, string> = {
+    empty: "empty content",
+    error: "processing errors",
+    "no-file": "missing files",
+    redirect: "redirects",
+  };
+
+  const parts = [...grouped.entries()].map(
+    ([reason, pages]) => `${pages.length} ${labels[reason]}`
+  );
+  console.log(`  Skipped ${skipped.length} pages (${parts.join(", ")})`);
+
+  if (verbose) {
+    for (const entry of skipped) {
+      const suffix =
+        entry.reason === "redirect" && entry.redirectTarget ? ` → ${entry.redirectTarget}` : "";
+      console.log(`    ${entry.urlPath} (${entry.reason}${suffix})`);
+    }
+  }
+}
+
+export async function generateLlmsMarkdown(config: LlmfoodConfig): Promise<void> {
   console.log("\nDiscovering pages...");
 
   const ignorePatterns = config.ignorePatterns ?? [];
@@ -171,17 +235,25 @@ export function generateLlmsMarkdown(config: LlmfoodConfig): void {
 
   console.log("Converting HTML to Markdown...");
   const pages: PageEntry[] = [];
+  const skipped: SkippedPage[] = [];
+
   for (const p of urlPaths) {
     try {
-      const result = processPage(config.buildDir, p);
-      if (result) {
+      const result = await processPage(config, p);
+      if (isPageEntry(result)) {
         pages.push(result);
+      } else {
+        skipped.push(result);
       }
     } catch (e) {
-      console.warn(`  Skipped ${p}: ${e}`);
+      console.warn(`  Warning: ${p}: ${e}`);
+      skipped.push({ reason: "error", urlPath: p });
     }
   }
-  console.log(`  Converted ${pages.length} pages\n`);
+
+  console.log(`  Converted ${pages.length} pages`);
+  logSkipSummary(skipped, config.verbose ?? false);
+  console.log();
 
   console.log("Generating llms.txt files...");
   generateLlmsTxt(config, pages);
