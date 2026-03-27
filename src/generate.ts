@@ -66,13 +66,13 @@ async function processPage(
   }
 
   let html = fs.readFileSync(htmlPath, "utf-8");
-  const title = extractTitle(html);
 
   const redirectTarget = detectRedirect(html);
   if (redirectTarget) {
     return { reason: "redirect", redirectTarget, urlPath };
   }
 
+  const title = extractTitle(html);
   const context = { urlPath };
   if (config.postProcessHtml) {
     html = await config.postProcessHtml(html, context);

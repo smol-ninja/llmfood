@@ -34,11 +34,11 @@ export default function llmfoodPlugin(
     async postBuild({ outDir }) {
       const { siteConfig } = context;
       await generateLlmsMarkdown({
+        ...options,
         baseUrl: siteConfig.url,
         buildDir: outDir,
         siteDescription: siteConfig.tagline,
         siteTitle: siteConfig.title,
-        ...options,
       });
     },
   };
