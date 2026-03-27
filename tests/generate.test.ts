@@ -31,6 +31,15 @@ function writeHtmlPage(urlPath: string, body: string): void {
   );
 }
 
+function writeRedirectPage(urlPath: string, target: string): void {
+  const dir = path.join(buildDir, urlPath);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "index.html"),
+    `<html><head><meta http-equiv="refresh" content="0;url=${target}"></head><body></body></html>`
+  );
+}
+
 function baseConfig(overrides?: Partial<LlmfoodConfig>): LlmfoodConfig {
   return {
     baseUrl: "https://docs.example.com",
@@ -44,35 +53,35 @@ describe("generateLlmsMarkdown", () => {
   // Page discovery
   // ──────────────────────────────────────────────────────────────────────────
 
-  it("discovers pages in nested directories", () => {
+  it("discovers pages in nested directories", async () => {
     writeHtmlPage("guides/getting-started", "Welcome");
     writeHtmlPage("api/tokens", "Tokens API");
 
-    generateLlmsMarkdown(baseConfig());
+    await generateLlmsMarkdown(baseConfig());
 
     const llmsTxt = fs.readFileSync(path.join(buildDir, "llms.txt"), "utf-8");
     expect(llmsTxt).toContain("/guides/getting-started");
     expect(llmsTxt).toContain("/api/tokens");
   });
 
-  it("ignores root index.html", () => {
+  it("ignores root index.html", async () => {
     fs.writeFileSync(
       path.join(buildDir, "index.html"),
       "<html><body><article><h1>Home</h1><p>Home page</p></article></body></html>"
     );
     writeHtmlPage("guides/intro", "Intro");
 
-    generateLlmsMarkdown(baseConfig());
+    await generateLlmsMarkdown(baseConfig());
 
     const llmsTxt = fs.readFileSync(path.join(buildDir, "llms.txt"), "utf-8");
     expect(llmsTxt).not.toContain("[Home]");
   });
 
-  it("ignores pages matching ignorePatterns", () => {
+  it("ignores pages matching ignorePatterns", async () => {
     writeHtmlPage("guides/intro", "Intro");
     writeHtmlPage("blog/post-1", "Blog post");
 
-    generateLlmsMarkdown(baseConfig({ ignorePatterns: [/\/blog\//] }));
+    await generateLlmsMarkdown(baseConfig({ ignorePatterns: [/\/blog\//] }));
 
     const llmsTxt = fs.readFileSync(path.join(buildDir, "llms.txt"), "utf-8");
     expect(llmsTxt).toContain("/guides/intro");
@@ -83,10 +92,10 @@ describe("generateLlmsMarkdown", () => {
   // Markdown conversion and file output
   // ──────────────────────────────────────────────────────────────────────────
 
-  it("writes individual .md files for each page", () => {
+  it("writes individual .md files for each page", async () => {
     writeHtmlPage("guides/setup", "Setup instructions");
 
-    generateLlmsMarkdown(baseConfig());
+    await generateLlmsMarkdown(baseConfig());
 
     const mdPath = path.join(buildDir, "guides/setup.md");
     expect(fs.existsSync(mdPath)).toBe(true);
@@ -94,16 +103,16 @@ describe("generateLlmsMarkdown", () => {
     expect(content).toContain("Setup instructions");
   });
 
-  it("skips pages where HTML file does not exist", () => {
+  it("skips pages where HTML file does not exist", async () => {
     writeHtmlPage("guides/real", "Real page");
 
-    generateLlmsMarkdown(baseConfig());
+    await generateLlmsMarkdown(baseConfig());
 
     const llmsTxt = fs.readFileSync(path.join(buildDir, "llms.txt"), "utf-8");
     expect(llmsTxt).toContain("/guides/real");
   });
 
-  it("skips pages that produce empty markdown", () => {
+  it("skips pages that produce empty markdown", async () => {
     const dir = path.join(buildDir, "empty");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
@@ -113,21 +122,21 @@ describe("generateLlmsMarkdown", () => {
 
     writeHtmlPage("guides/valid", "Valid content");
 
-    generateLlmsMarkdown(baseConfig());
+    await generateLlmsMarkdown(baseConfig());
 
     const llmsTxt = fs.readFileSync(path.join(buildDir, "llms.txt"), "utf-8");
     expect(llmsTxt).toContain("/guides/valid");
     expect(llmsTxt).not.toContain("/empty");
   });
 
-  it("handles pages that throw errors during processing", () => {
+  it("handles pages that throw errors during processing", async () => {
     writeHtmlPage("guides/good", "Good content");
     writeHtmlPage("concepts/bad", "Bad content");
 
     // Block the output path by creating a directory where the .md file would go
     fs.mkdirSync(path.join(buildDir, "concepts/bad.md"), { recursive: true });
 
-    generateLlmsMarkdown(baseConfig());
+    await generateLlmsMarkdown(baseConfig());
 
     const llmsTxt = fs.readFileSync(path.join(buildDir, "llms.txt"), "utf-8");
     expect(llmsTxt).toContain("/guides/good");
@@ -138,10 +147,10 @@ describe("generateLlmsMarkdown", () => {
   // llms.txt generation
   // ──────────────────────────────────────────────────────────────────────────
 
-  it("includes site title and description in llms.txt", () => {
+  it("includes site title and description in llms.txt", async () => {
     writeHtmlPage("guides/intro", "Intro");
 
-    generateLlmsMarkdown(
+    await generateLlmsMarkdown(
       baseConfig({
         siteDescription: "Documentation for my project",
         siteTitle: "My Docs",
@@ -153,21 +162,21 @@ describe("generateLlmsMarkdown", () => {
     expect(llmsTxt).toContain("> Documentation for my project");
   });
 
-  it("includes rootContent in llms.txt", () => {
+  it("includes rootContent in llms.txt", async () => {
     writeHtmlPage("guides/intro", "Intro");
 
-    generateLlmsMarkdown(baseConfig({ rootContent: "This is additional root content." }));
+    await generateLlmsMarkdown(baseConfig({ rootContent: "This is additional root content." }));
 
     const llmsTxt = fs.readFileSync(path.join(buildDir, "llms.txt"), "utf-8");
     expect(llmsTxt).toContain("This is additional root content.");
   });
 
-  it("groups pages by section with default labels", () => {
+  it("groups pages by section with default labels", async () => {
     writeHtmlPage("guides/intro", "Intro");
     writeHtmlPage("guides/advanced", "Advanced");
     writeHtmlPage("api/tokens", "Tokens");
 
-    generateLlmsMarkdown(baseConfig());
+    await generateLlmsMarkdown(baseConfig());
 
     const llmsTxt = fs.readFileSync(path.join(buildDir, "llms.txt"), "utf-8");
     expect(llmsTxt).toContain("## Guides");
@@ -176,11 +185,11 @@ describe("generateLlmsMarkdown", () => {
     expect(llmsTxt).toContain("/guides/advanced");
   });
 
-  it("respects sectionOrder for sorting", () => {
+  it("respects sectionOrder for sorting", async () => {
     writeHtmlPage("api/tokens", "Tokens");
     writeHtmlPage("guides/intro", "Intro");
 
-    generateLlmsMarkdown(baseConfig({ sectionOrder: ["api", "guides"] }));
+    await generateLlmsMarkdown(baseConfig({ sectionOrder: ["api", "guides"] }));
 
     const llmsTxt = fs.readFileSync(path.join(buildDir, "llms.txt"), "utf-8");
     const apiPos = llmsTxt.indexOf("## Api");
@@ -188,16 +197,16 @@ describe("generateLlmsMarkdown", () => {
     expect(apiPos).toBeLessThan(guidesPos);
   });
 
-  it("uses custom section labels", () => {
+  it("uses custom section labels", async () => {
     writeHtmlPage("guides/intro", "Intro");
 
-    generateLlmsMarkdown(baseConfig({ sectionLabels: { guides: "User Guides" } }));
+    await generateLlmsMarkdown(baseConfig({ sectionLabels: { guides: "User Guides" } }));
 
     const llmsTxt = fs.readFileSync(path.join(buildDir, "llms.txt"), "utf-8");
     expect(llmsTxt).toContain("## User Guides");
   });
 
-  it("uses urlPath as description when page has no title", () => {
+  it("uses urlPath as description when page has no title", async () => {
     const dir = path.join(buildDir, "guides/notitle");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
@@ -205,13 +214,13 @@ describe("generateLlmsMarkdown", () => {
       "<html><body><article><p>Content without title</p></article></body></html>"
     );
 
-    generateLlmsMarkdown(baseConfig());
+    await generateLlmsMarkdown(baseConfig());
 
     const llmsTxt = fs.readFileSync(path.join(buildDir, "llms.txt"), "utf-8");
     expect(llmsTxt).toContain("[/guides/notitle]");
   });
 
-  it("extracts title from h1 and strips HTML tags", () => {
+  it("extracts title from h1 and strips HTML tags", async () => {
     const dir = path.join(buildDir, "guides/fancy");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
@@ -219,7 +228,7 @@ describe("generateLlmsMarkdown", () => {
       '<html><body><article><h1>Hello <span class="badge">v2</span></h1><p>Content</p></article></body></html>'
     );
 
-    generateLlmsMarkdown(baseConfig());
+    await generateLlmsMarkdown(baseConfig());
 
     const llmsTxt = fs.readFileSync(path.join(buildDir, "llms.txt"), "utf-8");
     expect(llmsTxt).toContain("[Hello v2]");
@@ -229,11 +238,11 @@ describe("generateLlmsMarkdown", () => {
   // Custom files
   // ──────────────────────────────────────────────────────────────────────────
 
-  it("generates custom llms files with title, description, and matching pages", () => {
+  it("generates custom llms files with title, description, and matching pages", async () => {
     writeHtmlPage("guides/intro", "Intro content");
     writeHtmlPage("api/tokens", "Tokens content");
 
-    generateLlmsMarkdown(
+    await generateLlmsMarkdown(
       baseConfig({
         customFiles: [
           {
@@ -253,10 +262,10 @@ describe("generateLlmsMarkdown", () => {
     expect(customFile).not.toContain("Tokens content");
   });
 
-  it("generates custom file without title or description", () => {
+  it("generates custom file without title or description", async () => {
     writeHtmlPage("guides/intro", "Intro content");
 
-    generateLlmsMarkdown(
+    await generateLlmsMarkdown(
       baseConfig({
         customFiles: [
           {
@@ -273,7 +282,7 @@ describe("generateLlmsMarkdown", () => {
     expect(customFile).toContain("Intro content");
   });
 
-  it("uses urlPath when page has no title in custom files", () => {
+  it("uses urlPath when page has no title in custom files", async () => {
     const dir = path.join(buildDir, "guides/notitle");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
@@ -281,7 +290,7 @@ describe("generateLlmsMarkdown", () => {
       "<html><body><article><p>Content</p></article></body></html>"
     );
 
-    generateLlmsMarkdown(
+    await generateLlmsMarkdown(
       baseConfig({
         customFiles: [
           {
@@ -296,10 +305,10 @@ describe("generateLlmsMarkdown", () => {
     expect(customFile).toContain("## /guides/notitle");
   });
 
-  it("works with no custom files configured", () => {
+  it("works with no custom files configured", async () => {
     writeHtmlPage("guides/intro", "Intro");
 
-    generateLlmsMarkdown(baseConfig());
+    await generateLlmsMarkdown(baseConfig());
 
     expect(fs.existsSync(path.join(buildDir, "llms.txt"))).toBe(true);
   });
@@ -308,19 +317,163 @@ describe("generateLlmsMarkdown", () => {
   // Edge cases
   // ──────────────────────────────────────────────────────────────────────────
 
-  it("handles empty build directory", () => {
-    generateLlmsMarkdown(baseConfig());
+  it("handles empty build directory", async () => {
+    await generateLlmsMarkdown(baseConfig());
 
     const llmsTxt = fs.readFileSync(path.join(buildDir, "llms.txt"), "utf-8");
     expect(llmsTxt).toBe("");
   });
 
-  it("generates correct URLs with baseUrl", () => {
+  it("generates correct URLs with baseUrl", async () => {
     writeHtmlPage("guides/intro", "Intro");
 
-    generateLlmsMarkdown(baseConfig({ baseUrl: "https://custom.example.com" }));
+    await generateLlmsMarkdown(baseConfig({ baseUrl: "https://custom.example.com" }));
 
     const llmsTxt = fs.readFileSync(path.join(buildDir, "llms.txt"), "utf-8");
     expect(llmsTxt).toContain("https://custom.example.com/guides/intro.md");
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Skip reporting
+  // ──────────────────────────────────────────────────────────────────────────
+
+  it("reports skipped redirect pages", async () => {
+    writeHtmlPage("guides/intro", "Intro");
+    writeRedirectPage("old/page", "/guides/intro");
+    writeRedirectPage("old/other", "/guides/intro");
+
+    await generateLlmsMarkdown(baseConfig());
+
+    const llmsTxt = fs.readFileSync(path.join(buildDir, "llms.txt"), "utf-8");
+    expect(llmsTxt).toContain("/guides/intro");
+    expect(llmsTxt).not.toContain("/old/page");
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining("Skipped 2 pages (2 redirects)")
+    );
+  });
+
+  it("reports multiple skip reasons in summary", async () => {
+    writeHtmlPage("guides/valid", "Valid content");
+    writeRedirectPage("old/redirect", "/guides/valid");
+
+    const emptyDir = path.join(buildDir, "empty/page");
+    fs.mkdirSync(emptyDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(emptyDir, "index.html"),
+      "<html><body><div>No article</div></body></html>"
+    );
+
+    await generateLlmsMarkdown(baseConfig());
+
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("Skipped 2 pages"));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("1 redirects"));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("1 empty content"));
+  });
+
+  it("logs individual skipped pages in verbose mode", async () => {
+    writeHtmlPage("guides/valid", "Valid content");
+    writeRedirectPage("old/page", "/guides/valid");
+
+    await generateLlmsMarkdown(baseConfig({ verbose: true }));
+
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining("/old/page (redirect → /guides/valid)")
+    );
+  });
+
+  it("does not log skip details when not verbose", async () => {
+    writeRedirectPage("old/page", "/guides/intro");
+
+    await generateLlmsMarkdown(baseConfig({ verbose: false }));
+
+    const detailCalls = vi
+      .mocked(console.log)
+      .mock.calls.filter(
+        (args) => typeof args[0] === "string" && args[0].includes("/old/page (redirect")
+      );
+    expect(detailCalls).toHaveLength(0);
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Post-processing hooks
+  // ──────────────────────────────────────────────────────────────────────────
+
+  it("applies postProcessHtml before conversion", async () => {
+    writeHtmlPage("guides/intro", "loading...");
+
+    await generateLlmsMarkdown(
+      baseConfig({
+        postProcessHtml: (html) => html.replace("loading...", "Resolved content"),
+      })
+    );
+
+    const mdPath = path.join(buildDir, "guides/intro.md");
+    const content = fs.readFileSync(mdPath, "utf-8");
+    expect(content).toContain("Resolved content");
+    expect(content).not.toContain("loading...");
+  });
+
+  it("applies postProcessMarkdown after conversion", async () => {
+    writeHtmlPage("guides/intro", "Some content");
+
+    await generateLlmsMarkdown(
+      baseConfig({
+        postProcessMarkdown: (md) => `${md}\n\n<!-- processed -->`,
+      })
+    );
+
+    const mdPath = path.join(buildDir, "guides/intro.md");
+    const content = fs.readFileSync(mdPath, "utf-8");
+    expect(content).toContain("<!-- processed -->");
+  });
+
+  it("passes urlPath in hook context", async () => {
+    writeHtmlPage("guides/intro", "Content");
+
+    const paths: string[] = [];
+    await generateLlmsMarkdown(
+      baseConfig({
+        postProcessHtml: (html, ctx) => {
+          paths.push(ctx.urlPath);
+          return html;
+        },
+      })
+    );
+
+    expect(paths).toContain("/guides/intro");
+  });
+
+  it("supports async postProcessHtml", async () => {
+    writeHtmlPage("guides/intro", "placeholder");
+
+    await generateLlmsMarkdown(
+      baseConfig({
+        postProcessHtml: async (html) => {
+          await new Promise((resolve) => setTimeout(resolve, 1));
+          return html.replace("placeholder", "async resolved");
+        },
+      })
+    );
+
+    const mdPath = path.join(buildDir, "guides/intro.md");
+    const content = fs.readFileSync(mdPath, "utf-8");
+    expect(content).toContain("async resolved");
+  });
+
+  it("supports async postProcessMarkdown", async () => {
+    writeHtmlPage("guides/intro", "Content");
+
+    await generateLlmsMarkdown(
+      baseConfig({
+        postProcessMarkdown: async (md) => {
+          await new Promise((resolve) => setTimeout(resolve, 1));
+          return `${md}\n\n<!-- async -->`;
+        },
+      })
+    );
+
+    const mdPath = path.join(buildDir, "guides/intro.md");
+    const content = fs.readFileSync(mdPath, "utf-8");
+    expect(content).toContain("<!-- async -->");
   });
 });
