@@ -1,0 +1,75 @@
+{
+  "name": "llmfood",
+  "description": "Generate LLM-friendly Markdown from Docusaurus HTML builds",
+  "version": "1.0.0-beta.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/**"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "bun run clean && bun run tsc-build",
+    "check": "bun run check:biome && bun run check:prettier && bun run check:types",
+    "check:biome": "biome check .",
+    "check:prettier": "prettier --check --cache --log-level warn --no-error-on-unmatched-pattern \"**/*.{md,mdx,yaml,yml}\"",
+    "check:types": "tsc --noEmit",
+    "clean": "del-cli dist *.tgz",
+    "fix": "bun run fix:biome && bun run fix:prettier",
+    "fix:biome": "biome check --write . && biome lint --unsafe --write --only correctness/noUnusedImports .",
+    "fix:prettier": "prettier --write --cache --log-level warn --no-error-on-unmatched-pattern \"**/*.{md,mdx,yaml,yml}\"",
+    "prepack": "bun install --frozen-lockfile && bun run build",
+    "prepare": "husky",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest",
+    "tsc-build": "tsc -p tsconfig.build.json"
+  },
+  "keywords": [
+    "ai",
+    "docusaurus",
+    "llm",
+    "llmstxt",
+    "markdown"
+  ],
+  "homepage": "https://github.com/smol-ninja/llmfood#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/smol-ninja/llmfood.git"
+  },
+  "bugs": {
+    "url": "https://github.com/smol-ninja/llmfood/issues"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "turndown": "^7.2.2"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.11",
+    "@sablier/devkit": "^1.12.0",
+    "@types/node": "^24.3.0",
+    "@types/turndown": "^5.0.6",
+    "@vitest/coverage-v8": "^4.1.2",
+    "del-cli": "^7.0.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
+    "prettier": "^3.8.1",
+    "typescript": "5.8.3",
+    "ultracite": "^7.2.5",
+    "vitest": "^4.1.2"
+  },
+  "engines": {
+    "node": ">=20.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

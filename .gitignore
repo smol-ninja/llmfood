@@ -1,0 +1,11 @@
+# directories
+.serena/
+dist/
+node_modules/
+
+# files
+*.env
+*.log
+*.tgz
+*.tsbuildinfo
+test-results.json
