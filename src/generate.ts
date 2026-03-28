@@ -2,6 +2,15 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { htmlToMarkdown } from "./convert.js";
+import type { SourcePageData } from "./resolve.js";
+import {
+  fetchAllGithubCode,
+  replaceGithubCodeblocks,
+  replaceLoadingContent,
+  replaceMermaidSvgs,
+  resolveSourceContent,
+  scanGithubRefs,
+} from "./resolve.js";
 import type { LlmfoodConfig, PageEntry, SkippedPage, SkipReason } from "./types.js";
 
 const H1_PATTERN = /<h1[^>]*>([\s\S]*?)<\/h1>/;
@@ -56,7 +65,9 @@ function detectRedirect(html: string): string | undefined {
 
 async function processPage(
   config: LlmfoodConfig,
-  urlPath: string
+  urlPath: string,
+  resolvedCode?: Map<string, string>,
+  sourceData?: SourcePageData
 ): Promise<PageEntry | SkippedPage> {
   const htmlPath = path.join(config.buildDir, urlPath.slice(1), "index.html");
 
@@ -73,6 +84,14 @@ async function processPage(
   }
 
   const title = extractTitle(html);
+  if (resolvedCode?.size) {
+    html = replaceGithubCodeblocks(html, resolvedCode);
+  }
+  if (sourceData) {
+    html = replaceMermaidSvgs(html, sourceData.mermaidBlocks);
+    html = replaceLoadingContent(html, sourceData.resolvedRemoteContent);
+  }
+
   const context = { urlPath };
   if (config.postProcessHtml) {
     html = await config.postProcessHtml(html, context);
@@ -233,13 +252,41 @@ export async function generateLlmsMarkdown(config: LlmfoodConfig): Promise<void>
   const urlPaths = discoverPages(config.buildDir).filter((p) => !shouldIgnore(p, ignorePatterns));
   console.log(`  Found ${urlPaths.length} pages to convert\n`);
 
+  const githubRefs = scanGithubRefs(config.buildDir, urlPaths);
+  let resolvedCode: Map<string, string> | undefined;
+  if (githubRefs.length > 0) {
+    console.log(`Resolving ${githubRefs.length} GitHub code references...`);
+    resolvedCode = await fetchAllGithubCode(githubRefs);
+    console.log(`  Resolved ${resolvedCode.size}/${githubRefs.length} code blocks\n`);
+  }
+
+  let sourceContent: Map<string, SourcePageData> | undefined;
+  if (config.docsDir) {
+    sourceContent = await resolveSourceContent(config.docsDir, urlPaths);
+    if (sourceContent.size > 0) {
+      const mermaidCount = [...sourceContent.values()].reduce(
+        (sum, d) => sum + d.mermaidBlocks.length,
+        0
+      );
+      const remoteCount = [...sourceContent.values()].reduce(
+        (sum, d) => sum + d.resolvedRemoteContent.length,
+        0
+      );
+      if (mermaidCount > 0 || remoteCount > 0) {
+        console.log(
+          `Resolved from source files: ${mermaidCount} mermaid blocks, ${remoteCount} remote content\n`
+        );
+      }
+    }
+  }
+
   console.log("Converting HTML to Markdown...");
   const pages: PageEntry[] = [];
   const skipped: SkippedPage[] = [];
 
   for (const p of urlPaths) {
     try {
-      const result = await processPage(config, p);
+      const result = await processPage(config, p, resolvedCode, sourceContent?.get(p));
       if (isPageEntry(result)) {
         pages.push(result);
       } else {

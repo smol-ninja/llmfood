@@ -10,14 +10,9 @@ export default defineConfig({
     outputFile: CI ? "./test-results.json" : undefined,
     reporters: CI ? ["github-actions", "json"] : ["default"],
     coverage: {
+      exclude: ["src/index.ts", "src/turndown-plugin-gfm.d.ts", "src/types.ts"],
       include: ["src/**/*.ts"],
       reporter: CI ? ["text", "json"] : ["text"],
-      exclude: [
-        "src/docusaurus.ts",
-        "src/index.ts",
-        "src/turndown-plugin-gfm.d.ts",
-        "src/types.ts",
-      ],
       thresholds: {
         branches: 90,
         functions: 95,

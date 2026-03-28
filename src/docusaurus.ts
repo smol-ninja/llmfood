@@ -1,8 +1,11 @@
+import * as path from "node:path";
+
 import { generateLlmsMarkdown } from "./generate.js";
 import type { CustomLlmFile, ProcessContext } from "./types.js";
 
 export type LlmfoodPluginOptions = {
   customFiles?: CustomLlmFile[];
+  docsDir?: string;
   ignorePatterns?: RegExp[];
   postProcessHtml?: (html: string, context: ProcessContext) => string | Promise<string>;
   postProcessMarkdown?: (markdown: string, context: ProcessContext) => string | Promise<string>;
@@ -13,6 +16,7 @@ export type LlmfoodPluginOptions = {
 };
 
 type DocusaurusContext = {
+  siteDir: string;
   siteConfig: {
     tagline?: string;
     title: string;
@@ -32,11 +36,12 @@ export default function llmfoodPlugin(
   return {
     name: "llmfood",
     async postBuild({ outDir }) {
-      const { siteConfig } = context;
+      const { siteConfig, siteDir } = context;
       await generateLlmsMarkdown({
         ...options,
         baseUrl: siteConfig.url,
         buildDir: outDir,
+        docsDir: options.docsDir ?? path.join(siteDir, "docs"),
         siteDescription: siteConfig.tagline,
         siteTitle: siteConfig.title,
       });

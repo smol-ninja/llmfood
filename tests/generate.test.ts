@@ -477,3 +477,132 @@ describe("generateLlmsMarkdown", () => {
     expect(content).toContain("<!-- async -->");
   });
 });
+
+describe("GitHub codeblock resolution", () => {
+  function writeGithubCodeblockPage(urlPath: string, githubUrl: string): void {
+    const dir = path.join(buildDir, urlPath);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "index.html"),
+      `<html><body><article>
+        <h1>Test</h1>
+        <div class="docusaurus-theme-github-codeblock">
+          <div class="codeBlockContainer"><div class="codeBlockContent">
+            <pre class="prism-code language-typescript"><code>loading...</code></pre>
+          </div></div>
+          <div style="text-align:right">
+            <a href="${githubUrl}" class="githubLink" target="_blank">View on GitHub</a>
+          </div>
+        </div></div></div>
+      </article></body></html>`
+    );
+  }
+
+  it("resolves github codeblocks in the output markdown", async () => {
+    const githubUrl = "https://github.com/org/repo/blob/main/src/example.ts#L2-L4";
+    writeGithubCodeblockPage("guides/code", githubUrl);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve("line 1\nline 2\nline 3\nline 4\nline 5\n"),
+      })
+    );
+
+    await generateLlmsMarkdown(baseConfig());
+
+    const mdPath = path.join(buildDir, "guides/code.md");
+    const content = fs.readFileSync(mdPath, "utf-8");
+    expect(content).toContain("line 2");
+    expect(content).toContain("line 3");
+    expect(content).toContain("line 4");
+    expect(content).not.toContain("loading...");
+
+    vi.unstubAllGlobals();
+  });
+
+  it("does not call fetch when no github codeblocks are present", async () => {
+    writeHtmlPage("guides/plain", "No code blocks here");
+
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await generateLlmsMarkdown(baseConfig());
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("source file scanning", () => {
+  let docsDir: string;
+
+  beforeEach(() => {
+    docsDir = path.join(tmpDir, "docs");
+    fs.mkdirSync(docsDir, { recursive: true });
+  });
+
+  function writeSourceFile(relativePath: string, content: string): void {
+    const fullPath = path.join(docsDir, relativePath);
+    fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+    fs.writeFileSync(fullPath, content);
+  }
+
+  function writeMermaidPage(urlPath: string): void {
+    const dir = path.join(buildDir, urlPath);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "index.html"),
+      `<html><body><article>
+        <h1>Diagram</h1>
+        <svg id="mermaid-123" xmlns="http://www.w3.org/2000/svg"><g><text>chart</text></g></svg>
+      </article></body></html>`
+    );
+  }
+
+  it("replaces mermaid SVGs with source code blocks", async () => {
+    writeMermaidPage("docs/diagrams");
+    writeSourceFile("diagrams.md", "# Diagrams\n\n```mermaid\ngraph TD\n  A --> B\n```\n");
+
+    await generateLlmsMarkdown(baseConfig({ docsDir }));
+
+    const mdPath = path.join(buildDir, "docs/diagrams.md");
+    const content = fs.readFileSync(mdPath, "utf-8");
+    expect(content).toContain("graph TD");
+    expect(content).toContain("A --> B");
+  });
+
+  it("resolves remote content from source URLs", async () => {
+    const dir = path.join(buildDir, "docs/benchmarks");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "index.html"),
+      `<html><body><article>
+        <h1>Benchmarks</h1>
+        <div>Loading content...</div>
+      </article></body></html>`
+    );
+    writeSourceFile(
+      "benchmarks.md",
+      '<RemoteGFMContent url="https://raw.githubusercontent.com/org/repo/main/bench.md" />'
+    );
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve("| Method | Gas |\n|--------|-----|\n| foo | 100 |\n"),
+      })
+    );
+
+    await generateLlmsMarkdown(baseConfig({ docsDir }));
+
+    const mdPath = path.join(buildDir, "docs/benchmarks.md");
+    const content = fs.readFileSync(mdPath, "utf-8");
+    expect(content).toContain("foo");
+    expect(content).not.toContain("Loading content...");
+
+    vi.unstubAllGlobals();
+  });
+});

@@ -13,6 +13,7 @@ export type LlmfoodConfig = {
   baseUrl: string;
   buildDir: string;
   customFiles?: CustomLlmFile[];
+  docsDir?: string;
   ignorePatterns?: RegExp[];
   postProcessHtml?: (html: string, context: ProcessContext) => string | Promise<string>;
   postProcessMarkdown?: (markdown: string, context: ProcessContext) => string | Promise<string>;

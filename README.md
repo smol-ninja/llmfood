@@ -8,9 +8,11 @@ Generate LLM-friendly Markdown from [Docusaurus](https://docusaurus.io/) HTML bu
 llmfood converts a Docusaurus static HTML build into clean Markdown files optimized for LLM consumption. It:
 
 1. **Discovers** all pages in a Docusaurus build directory
-2. **Converts** each HTML page to Markdown, stripping Docusaurus chrome (breadcrumbs, pagination, TOC, footers)
-3. **Generates `llms.txt`** — a structured index linking to all converted `.md` files
-4. **Generates custom files** — aggregated Markdown files matching URL patterns (e.g., `llms-full.txt`)
+2. **Resolves** client-side content that doesn't exist in static HTML (GitHub code references, remote content, mermaid
+   diagrams)
+3. **Converts** each HTML page to Markdown, stripping Docusaurus chrome (breadcrumbs, pagination, TOC, footers)
+4. **Generates `llms.txt`** — a structured index linking to all converted `.md` files
+5. **Generates custom files** — aggregated Markdown files matching URL patterns (e.g., `llms-full.txt`)
 
 ## Installation
 
@@ -22,16 +24,48 @@ bun add llmfood
 
 ## Usage
 
-Create a script that runs after `docusaurus build`:
+### Docusaurus Plugin (recommended)
+
+Add llmfood as a Docusaurus plugin for zero-config integration. It runs automatically after `docusaurus build`:
+
+```javascript
+// docusaurus.config.js
+module.exports = {
+  plugins: [
+    [
+      "llmfood/docusaurus",
+      {
+        sectionOrder: ["guides", "api", "concepts"],
+        sectionLabels: { guides: "Guides", api: "API Reference" },
+        customFiles: [
+          {
+            filename: "llms-full.txt",
+            title: "Full Documentation",
+            description: "Complete documentation in a single file",
+            includePatterns: [/.*/],
+          },
+        ],
+      },
+    ],
+  ],
+};
+```
+
+The plugin automatically derives `baseUrl`, `buildDir`, `siteTitle`, and `siteDescription` from your Docusaurus config.
+It also sets `docsDir` to `{siteDir}/docs` by default, enabling source file scanning for mermaid diagrams and remote
+content resolution.
+
+### Standalone
 
 ```typescript
 import { generateLlmsMarkdown } from "llmfood";
 
-generateLlmsMarkdown({
+await generateLlmsMarkdown({
   baseUrl: "https://docs.example.com",
   buildDir: "./build",
   siteTitle: "My Docs",
   siteDescription: "Documentation for my project",
+  docsDir: "./docs", // optional: enables source file scanning
   sectionOrder: ["guides", "api", "concepts"],
   sectionLabels: { guides: "Guides", api: "API Reference" },
   ignorePatterns: [/\/blog\//],
@@ -56,6 +90,23 @@ import { htmlToMarkdown } from "llmfood";
 const markdown = htmlToMarkdown(docusaurusHtmlString);
 ```
 
+## Content Resolution
+
+Some Docusaurus plugins render content client-side, so the static HTML contains placeholders instead of real content.
+llmfood automatically detects and resolves these:
+
+| Pattern                               | Detection                                                         | Resolution                                                         |
+| ------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------ |
+| GitHub code references                | `<a class="githubLink">` from `docusaurus-theme-github-codeblock` | Extracts GitHub URL, fetches code from `raw.githubusercontent.com` |
+| Remote content ("Loading content...") | `url="..."` in MDX source files (requires `docsDir`)              | Fetches remote markdown content                                    |
+| Mermaid diagrams                      | ` ```mermaid ` blocks in MDX source files (requires `docsDir`)    | Injects mermaid source before SVG stripping                        |
+| YouTube embeds                        | `<iframe>` with YouTube URL                                       | Converts to `[title](youtube-url)` markdown link                   |
+
+GitHub code references are resolved from HTML alone. Remote content and mermaid resolution require the `docsDir` config
+option (set automatically by the Docusaurus plugin).
+
+All external fetches run in parallel with a concurrency limit of 6.
+
 ## API
 
 ### `generateLlmsMarkdown(config)`
@@ -64,17 +115,23 @@ Processes an entire Docusaurus build and generates `llms.txt` plus any custom fi
 
 #### `LlmfoodConfig`
 
-| Property          | Type                     | Required | Description                                                     |
-| ----------------- | ------------------------ | -------- | --------------------------------------------------------------- |
-| `baseUrl`         | `string`                 | Yes      | Base URL for generated links (e.g., `https://docs.example.com`) |
-| `buildDir`        | `string`                 | Yes      | Path to the Docusaurus build output directory                   |
-| `customFiles`     | `CustomLlmFile[]`        | No       | Custom aggregated output files to generate                      |
-| `ignorePatterns`  | `RegExp[]`               | No       | URL patterns to exclude (root `/` is always excluded)           |
-| `rootContent`     | `string`                 | No       | Additional content to include at the top of `llms.txt`          |
-| `sectionLabels`   | `Record<string, string>` | No       | Custom display labels for URL sections                          |
-| `sectionOrder`    | `string[]`               | No       | Ordering for sections in `llms.txt`                             |
-| `siteDescription` | `string`                 | No       | Site description shown in `llms.txt`                            |
-| `siteTitle`       | `string`                 | No       | Site title shown in `llms.txt`                                  |
+| Property              | Type                        | Required | Description                                                                 |
+| --------------------- | --------------------------- | -------- | --------------------------------------------------------------------------- |
+| `baseUrl`             | `string`                    | Yes      | Base URL for generated links (e.g., `https://docs.example.com`)             |
+| `buildDir`            | `string`                    | Yes      | Path to the Docusaurus build output directory                               |
+| `customFiles`         | `CustomLlmFile[]`           | No       | Custom aggregated output files to generate                                  |
+| `docsDir`             | `string`                    | No       | Path to docs source directory (enables mermaid + remote content resolution) |
+| `ignorePatterns`      | `RegExp[]`                  | No       | URL patterns to exclude (root `/` is always excluded)                       |
+| `postProcessHtml`     | `(html, context) => string` | No       | Hook to transform HTML before markdown conversion                           |
+| `postProcessMarkdown` | `(md, context) => string`   | No       | Hook to transform markdown after conversion                                 |
+| `rootContent`         | `string`                    | No       | Additional content to include at the top of `llms.txt`                      |
+| `sectionLabels`       | `Record<string, string>`    | No       | Custom display labels for URL sections                                      |
+| `sectionOrder`        | `string[]`                  | No       | Ordering for sections in `llms.txt`                                         |
+| `siteDescription`     | `string`                    | No       | Site description shown in `llms.txt`                                        |
+| `siteTitle`           | `string`                    | No       | Site title shown in `llms.txt`                                              |
+| `verbose`             | `boolean`                   | No       | Log individual skipped pages with reasons                                   |
+
+Both hooks receive a `ProcessContext` with `{ urlPath: string }` and may return a `Promise`.
 
 #### `CustomLlmFile`
 
@@ -104,6 +161,8 @@ The converter handles these Docusaurus-specific elements:
 - **Images** — converts to standard Markdown, skipping data URIs
 - **Tables** — converts to GFM table syntax with alignment support (`:---:`, `---:`)
 - **Strikethrough** — converts `<del>` and `<s>` to `~~text~~`
+- **YouTube iframes** — converts to markdown links with video title
+- **Mermaid code blocks** — preserves as fenced mermaid code blocks (when source is available)
 
 The following Docusaurus chrome is automatically stripped:
 
@@ -116,13 +175,25 @@ The following Docusaurus chrome is automatically stripped:
 - Style tags
 - SVG elements
 
+## Skip Reporting
+
+Pages that can't be converted are tracked and reported:
+
+- **redirect** — meta-refresh redirect pages (with target URL)
+- **empty** — pages with no extractable content
+- **no-file** — missing HTML files
+- **error** — pages that threw during processing
+
+Set `verbose: true` to see individual skipped pages in the output.
+
 ## Limitations
 
 - **Docusaurus-only** — tightly coupled to Docusaurus HTML class names and structure
 - **No incremental builds** — re-processes all pages on every run
 - **Single `<article>` assumption** — only the first `<article>` tag is processed
-- **No CLI** — library-only; consumers must write their own build script
 - **Regex-based stripping** — may break if Docusaurus changes its class naming conventions across major versions
+- **GitHub code resolution** — requires `showGithubLink: true` in `docusaurus-theme-github-codeblock` config (the
+  default) so the GitHub URL is present in the HTML
 
 ## Development
 
