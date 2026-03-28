@@ -479,28 +479,29 @@ describe("generateLlmsMarkdown", () => {
 });
 
 describe("GitHub codeblock resolution", () => {
-  function writeGithubCodeblockPage(urlPath: string, githubUrl: string): void {
-    const dir = path.join(buildDir, urlPath);
+  it("resolves github codeblocks from source files", async () => {
+    const githubUrl = "https://github.com/org/repo/blob/main/src/example.ts#L2-L4";
+
+    const dir = path.join(buildDir, "guides/code");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
       path.join(dir, "index.html"),
       `<html><body><article>
         <h1>Test</h1>
-        <div class="docusaurus-theme-github-codeblock">
-          <div class="codeBlockContainer"><div class="codeBlockContent">
-            <pre class="prism-code language-typescript"><code>loading...</code></pre>
-          </div></div>
-          <div style="text-align:right">
-            <a href="${githubUrl}" class="githubLink" target="_blank">View on GitHub</a>
-          </div>
+        <div class=docusaurus-theme-github-codeblock>
+          <div><pre class="prism-code language-typescript"><code>loading...</code></pre></div>
         </div></div></div>
       </article></body></html>`
     );
-  }
 
-  it("resolves github codeblocks in the output markdown", async () => {
-    const githubUrl = "https://github.com/org/repo/blob/main/src/example.ts#L2-L4";
-    writeGithubCodeblockPage("guides/code", githubUrl);
+    const docsDir = path.join(tmpDir, "docs");
+    fs.mkdirSync(path.join(docsDir, "guides"), { recursive: true });
+    fs.writeFileSync(
+      path.join(docsDir, "guides/code.mdx"),
+      `<CodeBlock language="typescript" metastring={\`reference title=""\`}>
+  {\`${githubUrl}\`}
+</CodeBlock>`
+    );
 
     vi.stubGlobal(
       "fetch",
@@ -510,7 +511,7 @@ describe("GitHub codeblock resolution", () => {
       })
     );
 
-    await generateLlmsMarkdown(baseConfig());
+    await generateLlmsMarkdown(baseConfig({ docsDir }));
 
     const mdPath = path.join(buildDir, "guides/code.md");
     const content = fs.readFileSync(mdPath, "utf-8");
@@ -522,7 +523,7 @@ describe("GitHub codeblock resolution", () => {
     vi.unstubAllGlobals();
   });
 
-  it("does not call fetch when no github codeblocks are present", async () => {
+  it("does not call fetch when no docsDir is set", async () => {
     writeHtmlPage("guides/plain", "No code blocks here");
 
     const fetchSpy = vi.fn();

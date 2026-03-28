@@ -1,7 +1,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-const GITHUB_URL_PATTERN = /href=["']?(https:\/\/github\.com\/[^\s"'>]+)["']?/g;
+const CODEBLOCK_JSX_PATTERN = /\{\s*`\s*(https:\/\/github\.com\/[^`\s]+)\s*`\s*\}\s*<\/CodeBlock>/g;
+const CODEBLOCK_FENCED_PATTERN =
+  /```\w+\s+reference\s+title="[^"]*"\s*\n\s*(https:\/\/github\.com\/\S+)\s*\n```/g;
 
 const DOC_EXTENSION_PATTERN = /\.(mdx?|md)$/;
 const NUMERIC_PREFIX_PATTERN = /^\d+-/;
@@ -144,51 +146,23 @@ async function withConcurrencyLimit<T>(
   return results;
 }
 
-export function scanGithubRefs(buildDir: string, urlPaths: string[]): string[] {
-  const urls = new Set<string>();
+export function extractGithubRefs(source: string): string[] {
+  const urls: string[] = [];
 
-  for (const urlPath of urlPaths) {
-    const htmlPath = path.join(buildDir, urlPath.slice(1), "index.html");
-    if (!fs.existsSync(htmlPath)) {
-      continue;
-    }
-
-    const html = fs.readFileSync(htmlPath, "utf-8");
-    WRAPPER_PATTERN.lastIndex = 0;
-    for (const wrapperMatch of html.matchAll(WRAPPER_PATTERN)) {
-      const inner = wrapperMatch[2];
-      GITHUB_URL_PATTERN.lastIndex = 0;
-      for (const linkMatch of inner.matchAll(GITHUB_URL_PATTERN)) {
-        urls.add(linkMatch[1]);
-      }
-    }
+  for (const match of source.matchAll(CODEBLOCK_JSX_PATTERN)) {
+    urls.push(match[1]);
+  }
+  for (const match of source.matchAll(CODEBLOCK_FENCED_PATTERN)) {
+    urls.push(match[1]);
   }
 
-  return [...urls];
-}
-
-export async function fetchAllGithubCode(urls: string[]): Promise<Map<string, string>> {
-  const resolved = new Map<string, string>();
-
-  const tasks = urls.map((url) => async () => {
-    const ref = parseGithubRef(url);
-    if (!ref) {
-      console.warn(`  Warning: could not parse GitHub reference: ${url}`);
-      return;
-    }
-
-    const code = await fetchGithubCode(ref);
-    if (code) {
-      resolved.set(url, code);
-    }
-  });
-
-  await withConcurrencyLimit(tasks, 6);
-  return resolved;
+  return urls;
 }
 
 export type SourcePageData = {
+  githubUrls: string[];
   mermaidBlocks: string[];
+  resolvedCode: string[];
   resolvedRemoteContent: string[];
 };
 
@@ -322,6 +296,37 @@ export function replaceLoadingContent(html: string, remoteContents: string[]): s
   });
 }
 
+async function fetchUrls(urls: Set<string>): Promise<Map<string, string>> {
+  const fetched = new Map<string, string>();
+  const tasks = [...urls].map((url) => async () => {
+    const ref = parseGithubRef(url) ?? {
+      fromLine: 0,
+      rawUrl: url,
+      toLine: Number.POSITIVE_INFINITY,
+    };
+    const content = await fetchGithubCode(ref);
+    if (content) {
+      fetched.set(url, content);
+    }
+  });
+  await withConcurrencyLimit(tasks, 6);
+  return fetched;
+}
+
+function distributeResolved(
+  pageUrls: Map<string, string[]>,
+  fetched: Map<string, string>
+): Map<string, string[]> {
+  const distributed = new Map<string, string[]>();
+  for (const [urlPath, urls] of pageUrls) {
+    distributed.set(
+      urlPath,
+      urls.map((url) => fetched.get(url)).filter((c): c is string => c !== undefined)
+    );
+  }
+  return distributed;
+}
+
 export async function resolveSourceContent(
   docsDir: string,
   urlPaths: string[],
@@ -329,7 +334,8 @@ export async function resolveSourceContent(
 ): Promise<Map<string, SourcePageData>> {
   const sourceMap = buildSourceMap(docsDir);
   const result = new Map<string, SourcePageData>();
-  const allRemoteUrls = new Set<string>();
+  const allFetchUrls = new Set<string>();
+  const pageGithubUrls = new Map<string, string[]>();
   const pageRemoteUrls = new Map<string, string[]>();
 
   for (const urlPath of urlPaths) {
@@ -340,59 +346,64 @@ export async function resolveSourceContent(
 
     const source = fs.readFileSync(sourcePath, "utf-8");
     const mermaidBlocks = extractMermaidBlocks(source);
+    const githubUrls = extractGithubRefs(source);
     const remoteUrls = extractRemoteUrls(source, resolveRemoteUrl);
 
-    if (mermaidBlocks.length === 0 && remoteUrls.length === 0) {
+    if (mermaidBlocks.length === 0 && githubUrls.length === 0 && remoteUrls.length === 0) {
       continue;
     }
 
-    for (const url of remoteUrls) {
-      allRemoteUrls.add(url);
+    for (const url of githubUrls) {
+      allFetchUrls.add(url);
     }
+    for (const url of remoteUrls) {
+      allFetchUrls.add(url);
+    }
+    pageGithubUrls.set(urlPath, githubUrls);
     pageRemoteUrls.set(urlPath, remoteUrls);
-    result.set(urlPath, { mermaidBlocks, resolvedRemoteContent: [] });
+    result.set(urlPath, {
+      githubUrls,
+      mermaidBlocks,
+      resolvedCode: [],
+      resolvedRemoteContent: [],
+    });
   }
 
-  if (allRemoteUrls.size > 0) {
-    const fetchedContent = new Map<string, string>();
-    const tasks = [...allRemoteUrls].map((url) => async () => {
-      const ref: GithubRef = { fromLine: 0, rawUrl: url, toLine: Number.POSITIVE_INFINITY };
-      const content = await fetchGithubCode(ref);
-      if (content) {
-        fetchedContent.set(url, content);
-      }
-    });
-    await withConcurrencyLimit(tasks, 6);
+  if (allFetchUrls.size > 0) {
+    const fetched = await fetchUrls(allFetchUrls);
+    const resolvedCodeMap = distributeResolved(pageGithubUrls, fetched);
+    const resolvedRemoteMap = distributeResolved(pageRemoteUrls, fetched);
 
-    for (const [urlPath, urls] of pageRemoteUrls) {
-      const data = result.get(urlPath);
-      if (data) {
-        data.resolvedRemoteContent = urls
-          .map((url) => fetchedContent.get(url))
-          .filter((c): c is string => c !== undefined);
-      }
+    for (const [urlPath, data] of result) {
+      data.resolvedCode = resolvedCodeMap.get(urlPath) ?? [];
+      data.resolvedRemoteContent = resolvedRemoteMap.get(urlPath) ?? [];
     }
   }
 
   return result;
 }
 
-export function replaceGithubCodeblocks(html: string, resolved: Map<string, string>): string {
+export function replaceGithubCodeblocks(
+  html: string,
+  resolvedCode: string[],
+  githubUrls: string[]
+): string {
+  if (resolvedCode.length === 0) {
+    return html;
+  }
+
+  let codeIndex = 0;
   WRAPPER_PATTERN.lastIndex = 0;
-  return html.replace(WRAPPER_PATTERN, (match, _open, inner: string) => {
-    GITHUB_URL_PATTERN.lastIndex = 0;
-    const linkMatch = GITHUB_URL_PATTERN.exec(inner);
-    if (!linkMatch) {
+  return html.replace(WRAPPER_PATTERN, (match) => {
+    if (codeIndex >= resolvedCode.length) {
       return match;
     }
 
-    const githubUrl = linkMatch[1];
-    const code = resolved.get(githubUrl);
-    if (!code) {
-      return match;
-    }
+    const code = resolvedCode[codeIndex];
+    const url = githubUrls[codeIndex];
+    codeIndex++;
 
-    const ref = parseGithubRef(githubUrl);
+    const ref = url ? parseGithubRef(url) : undefined;
     const lang = ref ? extToLanguage(ref.rawUrl) : "";
     const escaped = code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     return `<pre class="prism-code language-${lang}"><code>${escaped}</code></pre>`;

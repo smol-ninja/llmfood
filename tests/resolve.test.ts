@@ -4,16 +4,15 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildSourceMap,
+  extractGithubRefs,
   extractMermaidBlocks,
   extractRemoteUrls,
-  fetchAllGithubCode,
   findSourceForUrl,
   injectMermaidBlocks,
   parseGithubRef,
   replaceGithubCodeblocks,
   replaceLoadingContent,
   resolveSourceContent,
-  scanGithubRefs,
 } from "../src/resolve.js";
 
 describe("parseGithubRef", () => {
@@ -78,340 +77,100 @@ describe("parseGithubRef", () => {
   });
 });
 
-describe("scanGithubRefs", () => {
-  let tmpDir: string;
-  let buildDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "llmfood-resolve-test-"));
-    buildDir = path.join(tmpDir, "build");
-    fs.mkdirSync(buildDir, { recursive: true });
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { force: true, recursive: true });
-  });
-
-  function writePage(urlPath: string, html: string): void {
-    const dir = path.join(buildDir, urlPath);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, "index.html"), html);
-  }
-
-  it("extracts GitHub URLs from githubLink anchors (href before class)", () => {
-    writePage(
-      "docs/test",
-      `<div class="docusaurus-theme-github-codeblock">
-        <pre><code>loading...</code></pre>
-        <a href="https://github.com/org/repo/blob/main/file.ts#L1-L5" class="githubLink" target="_blank">View on GitHub</a>
-      </div></div></div>`
-    );
-    const refs = scanGithubRefs(buildDir, ["/docs/test"]);
-    expect(refs).toEqual(["https://github.com/org/repo/blob/main/file.ts#L1-L5"]);
-  });
-
-  it("extracts GitHub URLs from githubLink anchors (class before href)", () => {
-    writePage(
-      "docs/test",
-      `<div class="docusaurus-theme-github-codeblock">
-        <pre><code>loading...</code></pre>
-        <a class="githubLink" style="margin: 0" href="https://github.com/org/repo/blob/main/file.ts#L10-L20" target="_blank">GitHub</a>
-      </div></div></div>`
-    );
-    const refs = scanGithubRefs(buildDir, ["/docs/test"]);
-    expect(refs).toEqual(["https://github.com/org/repo/blob/main/file.ts#L10-L20"]);
-  });
-
-  it("deduplicates URLs referenced on multiple pages", () => {
-    const html = `<div class="docusaurus-theme-github-codeblock">
-      <a href="https://github.com/org/repo/blob/main/same.ts#L1-L5" class="githubLink">Link</a>
-    </div></div></div>`;
-    writePage("docs/a", html);
-    writePage("docs/b", html);
-    const refs = scanGithubRefs(buildDir, ["/docs/a", "/docs/b"]);
-    expect(refs).toHaveLength(1);
-  });
-
-  it("extracts GitHub URLs with unquoted href and empty class", () => {
-    writePage(
-      "docs/test",
-      `<div class="docusaurus-theme-github-codeblock">
-        <pre><code>loading...</code></pre>
-        <a href=https://github.com/sablier-labs/evm-monorepo/blob/main/misc/examples/lockup/LockupLinearStreamCreator.sol target=_blank rel="noopener noreferrer" style=display:inline-flex class="">this link</a>
-      </div></div></div>`
-    );
-    const refs = scanGithubRefs(buildDir, ["/docs/test"]);
-    expect(refs).toEqual([
-      "https://github.com/sablier-labs/evm-monorepo/blob/main/misc/examples/lockup/LockupLinearStreamCreator.sol",
+describe("extractGithubRefs", () => {
+  it("extracts URLs from JSX CodeBlock children", () => {
+    const source = `<CodeBlock language="solidity" metastring={\`reference title=""\`}>
+  {\`https://github.com/org/repo/blob/main/file.sol#L1-L5\`}
+</CodeBlock>`;
+    expect(extractGithubRefs(source)).toEqual([
+      "https://github.com/org/repo/blob/main/file.sol#L1-L5",
     ]);
   });
 
-  it("matches wrapper div with unquoted class attribute", () => {
-    writePage(
-      "docs/test",
-      `<div class=docusaurus-theme-github-codeblock>
-        <pre><code>loading...</code></pre>
-        <a href=https://github.com/org/repo/blob/main/file.sol target=_blank class="">link</a>
-      </div></div></div>`
-    );
-    const refs = scanGithubRefs(buildDir, ["/docs/test"]);
-    expect(refs).toEqual(["https://github.com/org/repo/blob/main/file.sol"]);
+  it("extracts URLs from fenced reference codeblocks", () => {
+    const source = `\`\`\`graphql reference title="Schema"
+https://github.com/org/repo/blob/main/schema.graphql
+\`\`\``;
+    expect(extractGithubRefs(source)).toEqual([
+      "https://github.com/org/repo/blob/main/schema.graphql",
+    ]);
   });
 
-  it("ignores GitHub links outside codeblock wrappers", () => {
-    writePage(
-      "docs/test",
-      `<article><p>Check out <a href="https://github.com/org/repo">our repo</a></p></article>`
-    );
-    expect(scanGithubRefs(buildDir, ["/docs/test"])).toEqual([]);
-  });
-
-  it("returns empty array when no patterns found", () => {
-    writePage("docs/plain", "<article><p>No code blocks here</p></article>");
-    expect(scanGithubRefs(buildDir, ["/docs/plain"])).toEqual([]);
-  });
-
-  it("skips missing HTML files", () => {
-    expect(scanGithubRefs(buildDir, ["/docs/nonexistent"])).toEqual([]);
-  });
-
-  it("finds multiple references on the same page", () => {
-    writePage(
-      "docs/multi",
-      `<div class="docusaurus-theme-github-codeblock">
-        <a href="https://github.com/org/repo/blob/main/a.ts#L1-L5" class="githubLink">Link</a>
-      </div></div></div>
-      <div class="docusaurus-theme-github-codeblock">
-        <a href="https://github.com/org/repo/blob/main/b.ts#L10-L20" class="githubLink">Link</a>
-      </div></div></div>`
-    );
-    const refs = scanGithubRefs(buildDir, ["/docs/multi"]);
+  it("extracts multiple URLs in order", () => {
+    const source = `<CodeBlock language="solidity" metastring={\`reference title=""\`}>
+  {\`https://github.com/org/repo/blob/main/a.sol#L1-L2\`}
+</CodeBlock>
+<CodeBlock language="solidity" metastring={\`reference title=""\`}>
+  {\`https://github.com/org/repo/blob/main/b.sol#L3-L4\`}
+</CodeBlock>`;
+    const refs = extractGithubRefs(source);
     expect(refs).toHaveLength(2);
+    expect(refs[0]).toContain("a.sol");
+    expect(refs[1]).toContain("b.sol");
+  });
+
+  it("returns empty array when no refs found", () => {
+    expect(extractGithubRefs("# Just a title\nSome text\n")).toEqual([]);
   });
 });
 
 describe("replaceGithubCodeblocks", () => {
-  it("replaces a github-codeblock wrapper with synthetic code block", () => {
-    const html = `<article><div class="docusaurus-theme-github-codeblock">
-      <div class="codeBlockContainer"><pre class="prism-code"><code>loading...</code></pre></div>
-      <div><a href="https://github.com/org/repo/blob/main/src/file.ts#L1-L5" class="githubLink" target="_blank">View on GitHub</a></div>
-    </div></div></div></article>`;
+  it("replaces wrapper divs with resolved code in order", () => {
+    const html =
+      '<div class="docusaurus-theme-github-codeblock"><div><pre><code>loading...</code></pre></div></div></div>' +
+      '<div class="docusaurus-theme-github-codeblock"><div><pre><code>loading...</code></pre></div></div></div>';
 
-    const resolved = new Map([
-      ["https://github.com/org/repo/blob/main/src/file.ts#L1-L5", "const x = 1;\nconsole.log(x);"],
-    ]);
+    const urls = [
+      "https://github.com/org/repo/blob/main/a.sol#L1-L2",
+      "https://github.com/org/repo/blob/main/b.ts#L3-L4",
+    ];
 
-    const result = replaceGithubCodeblocks(html, resolved);
-    expect(result).toContain('<pre class="prism-code language-typescript">');
-    expect(result).toContain("const x = 1;");
+    const result = replaceGithubCodeblocks(html, ["code a", "code b"], urls);
+    expect(result).toContain("code a");
+    expect(result).toContain("code b");
+    expect(result).toContain("language-solidity");
+    expect(result).toContain("language-typescript");
     expect(result).not.toContain("loading...");
   });
 
   it("escapes HTML entities in resolved code", () => {
-    const html = `<div class="docusaurus-theme-github-codeblock">
-      <pre><code>loading...</code></pre>
-      <a href="https://github.com/org/repo/blob/main/file.ts#L1-L2" class="githubLink">Link</a>
-    </div></div></div>`;
-
-    const resolved = new Map([
-      ["https://github.com/org/repo/blob/main/file.ts#L1-L2", "x < 10 && y > 5"],
-    ]);
-
-    const result = replaceGithubCodeblocks(html, resolved);
+    const html =
+      '<div class="docusaurus-theme-github-codeblock"><div><pre><code>loading...</code></pre></div></div></div>';
+    const urls = ["https://github.com/org/repo/blob/main/file.ts#L1-L2"];
+    const result = replaceGithubCodeblocks(html, ["x < 10 && y > 5"], urls);
     expect(result).toContain("x &lt; 10 &amp;&amp; y &gt; 5");
   });
 
-  it("leaves unresolved codeblocks unchanged", () => {
-    const html = `<div class="docusaurus-theme-github-codeblock">
-      <pre><code>loading...</code></pre>
-      <a href="https://github.com/org/repo/blob/main/missing.ts#L1-L5" class="githubLink">Link</a>
-    </div></div></div>`;
-
-    const resolved = new Map<string, string>();
-    const result = replaceGithubCodeblocks(html, resolved);
-    expect(result).toContain("loading...");
-  });
-
-  it("handles class-before-href anchor ordering", () => {
-    const html = `<div class="docusaurus-theme-github-codeblock">
-      <pre><code>loading...</code></pre>
-      <a class="githubLink" href="https://github.com/org/repo/blob/main/file.sol#L1-L2" target="_blank">Link</a>
-    </div></div></div>`;
-
-    const resolved = new Map([
-      ["https://github.com/org/repo/blob/main/file.sol#L1-L2", "pragma solidity;"],
-    ]);
-
-    const result = replaceGithubCodeblocks(html, resolved);
-    expect(result).toContain("pragma solidity;");
-    expect(result).toContain("language-solidity");
-    expect(result).not.toContain("loading...");
-  });
-
-  it("handles unquoted href with empty class", () => {
-    const html = `<div class="docusaurus-theme-github-codeblock">
-      <pre><code>loading...</code></pre>
-      <a href=https://github.com/org/repo/blob/main/file.sol target=_blank rel="noopener noreferrer" class="">Link</a>
-    </div></div></div>`;
-
-    const resolved = new Map([
-      ["https://github.com/org/repo/blob/main/file.sol", "contract Foo {}"],
-    ]);
-
-    const result = replaceGithubCodeblocks(html, resolved);
-    expect(result).toContain("contract Foo {}");
-    expect(result).toContain("language-solidity");
-    expect(result).not.toContain("loading...");
-  });
-
-  it("leaves wrapper unchanged when no GitHub link inside", () => {
-    const html = `<div class="docusaurus-theme-github-codeblock">
-      <pre><code>loading...</code></pre>
-      <a href="https://example.com/not-github" class="">Link</a>
-    </div></div></div>`;
-
-    const resolved = new Map<string, string>();
-    const result = replaceGithubCodeblocks(html, resolved);
-    expect(result).toContain("loading...");
+  it("returns unchanged when no code provided", () => {
+    const html =
+      '<div class="docusaurus-theme-github-codeblock"><div><pre><code>loading...</code></pre></div></div></div>';
+    expect(replaceGithubCodeblocks(html, [], [])).toBe(html);
   });
 
   it("leaves non-codeblock HTML untouched", () => {
     const html = "<article><p>Hello world</p></article>";
-    const resolved = new Map([["https://github.com/org/repo/blob/main/file.ts", "code"]]);
-    expect(replaceGithubCodeblocks(html, resolved)).toBe(html);
+    expect(
+      replaceGithubCodeblocks(html, ["code"], ["https://github.com/org/repo/blob/main/f.ts"])
+    ).toBe(html);
   });
 
-  it("maps common file extensions to language names", () => {
-    const makeHtml = (ext: string) =>
-      `<div class="docusaurus-theme-github-codeblock">
-        <pre><code>loading...</code></pre>
-        <a href="https://github.com/org/repo/blob/main/file.${ext}#L1-L2" class="githubLink">Link</a>
-      </div></div></div>`;
-
-    const cases: [string, string][] = [
-      ["sol", "solidity"],
-      ["ts", "typescript"],
-      ["js", "javascript"],
-      ["py", "python"],
-      ["rs", "rust"],
-      ["go", "go"],
-    ];
-
-    for (const [ext, lang] of cases) {
-      const resolved = new Map([
-        [`https://github.com/org/repo/blob/main/file.${ext}#L1-L2`, "code"],
-      ]);
-      const result = replaceGithubCodeblocks(makeHtml(ext), resolved);
-      expect(result).toContain(`language-${lang}`);
-    }
-  });
-});
-
-describe("fetchAllGithubCode", () => {
-  beforeEach(() => {
-    vi.spyOn(console, "warn").mockImplementation(vi.fn());
+  it("preserves extra wrappers when code runs out", () => {
+    const html =
+      '<div class="docusaurus-theme-github-codeblock"><div><pre><code>loading...</code></pre></div></div></div>' +
+      '<div class="docusaurus-theme-github-codeblock"><div><pre><code>loading...</code></pre></div></div></div>';
+    const urls = ["https://github.com/org/repo/blob/main/only.sol"];
+    const result = replaceGithubCodeblocks(html, ["only one"], urls);
+    expect(result).toContain("only one");
+    expect(result).toContain("loading...");
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("fetches and resolves code from GitHub", async () => {
-    const fileContent = "line 1\nline 2\nline 3\nline 4\nline 5\n";
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({ ok: true, text: () => Promise.resolve(fileContent) })
-    );
-
-    const urls = ["https://github.com/org/repo/blob/main/file.ts#L2-L4"];
-    const resolved = await fetchAllGithubCode(urls);
-
-    expect(resolved.get(urls[0])).toBe("line 2\nline 3\nline 4");
-    vi.unstubAllGlobals();
-  });
-
-  it("handles fetch failures gracefully", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 404 }));
-
-    const urls = ["https://github.com/org/repo/blob/main/file.ts#L1-L5"];
-    const resolved = await fetchAllGithubCode(urls);
-
-    expect(resolved.size).toBe(0);
-    vi.unstubAllGlobals();
-  });
-
-  it("handles network errors gracefully", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Network error")));
-
-    const urls = ["https://github.com/org/repo/blob/main/file.ts#L1-L5"];
-    const resolved = await fetchAllGithubCode(urls);
-
-    expect(resolved.size).toBe(0);
-    vi.unstubAllGlobals();
-  });
-
-  it("warns on invalid GitHub URLs", async () => {
-    const urls = ["https://github.com/incomplete"];
-    const resolved = await fetchAllGithubCode(urls);
-
-    expect(resolved.size).toBe(0);
-    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("could not parse"));
-  });
-
-  it("dedents code with no leading whitespace", async () => {
-    const fileContent = "no indent\nalso no indent\n";
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({ ok: true, text: () => Promise.resolve(fileContent) })
-    );
-
-    const urls = ["https://github.com/org/repo/blob/main/file.ts#L1-L2"];
-    const resolved = await fetchAllGithubCode(urls);
-
-    expect(resolved.get(urls[0])).toBe("no indent\nalso no indent");
-    vi.unstubAllGlobals();
-  });
-
-  it("dedents fetched code", async () => {
-    const fileContent = "    indented line 1\n    indented line 2\n";
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({ ok: true, text: () => Promise.resolve(fileContent) })
-    );
-
-    const urls = ["https://github.com/org/repo/blob/main/file.ts#L1-L2"];
-    const resolved = await fetchAllGithubCode(urls);
-
-    expect(resolved.get(urls[0])).toBe("indented line 1\nindented line 2");
-    vi.unstubAllGlobals();
-  });
-
-  it("returns empty map when line range is out of bounds", async () => {
-    const fileContent = "line 1\nline 2\n";
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({ ok: true, text: () => Promise.resolve(fileContent) })
-    );
-
-    const urls = ["https://github.com/org/repo/blob/main/file.ts#L100-L200"];
-    const resolved = await fetchAllGithubCode(urls);
-
-    expect(resolved.size).toBe(0);
-    vi.unstubAllGlobals();
-  });
-
-  it("fetches full file when no line range specified", async () => {
-    const fileContent = "line 1\nline 2\nline 3\n";
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({ ok: true, text: () => Promise.resolve(fileContent) })
-    );
-
-    const urls = ["https://github.com/org/repo/blob/main/file.ts"];
-    const resolved = await fetchAllGithubCode(urls);
-
-    expect(resolved.get(urls[0])).toBe("line 1\nline 2\nline 3\n");
-    vi.unstubAllGlobals();
+  it("handles unquoted class on wrapper div", () => {
+    const html =
+      "<div class=docusaurus-theme-github-codeblock><div><pre><code>loading...</code></pre></div></div></div>";
+    const urls = ["https://github.com/org/repo/blob/main/file.sol"];
+    const result = replaceGithubCodeblocks(html, ["contract Foo {}"], urls);
+    expect(result).toContain("contract Foo {}");
+    expect(result).not.toContain("loading...");
   });
 });
 
@@ -702,6 +461,31 @@ describe("resolveSourceContent", () => {
     expect(result.get("/docs/diagrams")?.mermaidBlocks).toEqual(["graph TD\n  A --> B"]);
   });
 
+  it("extracts and fetches GitHub code references from source", async () => {
+    writeSource(
+      "examples.mdx",
+      `<CodeBlock language="solidity" metastring={\`reference title=""\`}>
+  {\`https://github.com/org/repo/blob/main/file.sol#L1-L5\`}
+</CodeBlock>`
+    );
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve("line 1\nline 2\nline 3\nline 4\nline 5\n"),
+      })
+    );
+
+    const result = await resolveSourceContent(docsDir, ["/docs/examples"]);
+    const data = result.get("/docs/examples");
+    expect(data?.resolvedCode).toHaveLength(1);
+    expect(data?.resolvedCode[0]).toContain("line 1");
+    expect(data?.githubUrls).toEqual(["https://github.com/org/repo/blob/main/file.sol#L1-L5"]);
+
+    vi.unstubAllGlobals();
+  });
+
   it("fetches and resolves remote content URLs", async () => {
     writeSource(
       "benchmarks.md",
@@ -720,6 +504,63 @@ describe("resolveSourceContent", () => {
     const data = result.get("/docs/benchmarks");
     expect(data?.resolvedRemoteContent).toHaveLength(1);
     expect(data?.resolvedRemoteContent[0]).toContain("Col");
+
+    vi.unstubAllGlobals();
+  });
+
+  it("handles fetch failures for github code references", async () => {
+    writeSource(
+      "failing.mdx",
+      `<CodeBlock language="solidity" metastring={\`reference title=""\`}>
+  {\`https://github.com/org/repo/blob/main/missing.sol#L1-L5\`}
+</CodeBlock>`
+    );
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 404 }));
+
+    const result = await resolveSourceContent(docsDir, ["/docs/failing"]);
+    const data = result.get("/docs/failing");
+    expect(data?.resolvedCode).toHaveLength(0);
+
+    vi.unstubAllGlobals();
+  });
+
+  it("handles network errors during fetch", async () => {
+    writeSource(
+      "network.mdx",
+      `<CodeBlock language="solidity" metastring={\`reference title=""\`}>
+  {\`https://github.com/org/repo/blob/main/file.sol#L1-L2\`}
+</CodeBlock>`
+    );
+
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Network error")));
+
+    const result = await resolveSourceContent(docsDir, ["/docs/network"]);
+    const data = result.get("/docs/network");
+    expect(data?.resolvedCode).toHaveLength(0);
+
+    vi.unstubAllGlobals();
+  });
+
+  it("handles out-of-bounds line ranges", async () => {
+    writeSource(
+      "oob.mdx",
+      `<CodeBlock language="solidity" metastring={\`reference title=""\`}>
+  {\`https://github.com/org/repo/blob/main/file.sol#L100-L200\`}
+</CodeBlock>`
+    );
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve("line 1\nline 2\n"),
+      })
+    );
+
+    const result = await resolveSourceContent(docsDir, ["/docs/oob"]);
+    const data = result.get("/docs/oob");
+    expect(data?.resolvedCode).toHaveLength(0);
 
     vi.unstubAllGlobals();
   });
