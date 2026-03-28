@@ -132,6 +132,28 @@ describe("scanGithubRefs", () => {
     expect(refs).toHaveLength(1);
   });
 
+  it("extracts GitHub URLs with unquoted href and empty class", () => {
+    writePage(
+      "docs/test",
+      `<div class="docusaurus-theme-github-codeblock">
+        <pre><code>loading...</code></pre>
+        <a href=https://github.com/sablier-labs/evm-monorepo/blob/main/misc/examples/lockup/LockupLinearStreamCreator.sol target=_blank rel="noopener noreferrer" style=display:inline-flex class="">this link</a>
+      </div></div></div>`
+    );
+    const refs = scanGithubRefs(buildDir, ["/docs/test"]);
+    expect(refs).toEqual([
+      "https://github.com/sablier-labs/evm-monorepo/blob/main/misc/examples/lockup/LockupLinearStreamCreator.sol",
+    ]);
+  });
+
+  it("ignores GitHub links outside codeblock wrappers", () => {
+    writePage(
+      "docs/test",
+      `<article><p>Check out <a href="https://github.com/org/repo">our repo</a></p></article>`
+    );
+    expect(scanGithubRefs(buildDir, ["/docs/test"])).toEqual([]);
+  });
+
   it("returns empty array when no patterns found", () => {
     writePage("docs/plain", "<article><p>No code blocks here</p></article>");
     expect(scanGithubRefs(buildDir, ["/docs/plain"])).toEqual([]);
@@ -212,6 +234,33 @@ describe("replaceGithubCodeblocks", () => {
     expect(result).toContain("pragma solidity;");
     expect(result).toContain("language-solidity");
     expect(result).not.toContain("loading...");
+  });
+
+  it("handles unquoted href with empty class", () => {
+    const html = `<div class="docusaurus-theme-github-codeblock">
+      <pre><code>loading...</code></pre>
+      <a href=https://github.com/org/repo/blob/main/file.sol target=_blank rel="noopener noreferrer" class="">Link</a>
+    </div></div></div>`;
+
+    const resolved = new Map([
+      ["https://github.com/org/repo/blob/main/file.sol", "contract Foo {}"],
+    ]);
+
+    const result = replaceGithubCodeblocks(html, resolved);
+    expect(result).toContain("contract Foo {}");
+    expect(result).toContain("language-solidity");
+    expect(result).not.toContain("loading...");
+  });
+
+  it("leaves wrapper unchanged when no GitHub link inside", () => {
+    const html = `<div class="docusaurus-theme-github-codeblock">
+      <pre><code>loading...</code></pre>
+      <a href="https://example.com/not-github" class="">Link</a>
+    </div></div></div>`;
+
+    const resolved = new Map<string, string>();
+    const result = replaceGithubCodeblocks(html, resolved);
+    expect(result).toContain("loading...");
   });
 
   it("leaves non-codeblock HTML untouched", () => {
@@ -404,6 +453,25 @@ describe("buildSourceMap", () => {
     const map = buildSourceMap(docsDir);
     expect(map.has("guide")).toBe(true);
     expect(map.has("config")).toBe(false);
+  });
+
+  it("strips numeric prefixes from path segments", () => {
+    writeSource("guides/lockup/04-gas-benchmarks.mdx", "# Gas Benchmarks");
+    const map = buildSourceMap(docsDir);
+    expect(map.has("guides/lockup/gas-benchmarks")).toBe(true);
+    expect(map.has("guides/lockup/04-gas-benchmarks")).toBe(false);
+  });
+
+  it("strips numeric prefixes from all segments", () => {
+    writeSource("01-guides/02-lockup/03-examples.md", "# Examples");
+    const map = buildSourceMap(docsDir);
+    expect(map.has("guides/lockup/examples")).toBe(true);
+  });
+
+  it("does not strip non-prefix numbers", () => {
+    writeSource("guides/erc20-setup.mdx", "# ERC20");
+    const map = buildSourceMap(docsDir);
+    expect(map.has("guides/erc20-setup")).toBe(true);
   });
 
   it("returns empty map for nonexistent dir", () => {

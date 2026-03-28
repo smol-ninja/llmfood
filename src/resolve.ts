@@ -1,12 +1,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-const GITHUB_LINK_PATTERNS = [
-  /href="(https:\/\/github\.com\/[^"]+)"[^>]*class="[^"]*githubLink/g,
-  /class="[^"]*githubLink[^"]*"[^>]*href="(https:\/\/github\.com\/[^"]+)"/g,
-];
+const GITHUB_URL_PATTERN = /href=["']?(https:\/\/github\.com\/[^\s"'>]+)["']?/g;
 
 const DOC_EXTENSION_PATTERN = /\.(mdx?|md)$/;
+const NUMERIC_PREFIX_PATTERN = /^\d+-/;
 const FENCED_MERMAID_PATTERN = /```mermaid\n([\s\S]*?)```/g;
 const LEADING_WHITESPACE_PATTERN = /^\s+/;
 const LOADING_CONTENT_PATTERN =
@@ -157,10 +155,12 @@ export function scanGithubRefs(buildDir: string, urlPaths: string[]): string[] {
     }
 
     const html = fs.readFileSync(htmlPath, "utf-8");
-    for (const pattern of GITHUB_LINK_PATTERNS) {
-      pattern.lastIndex = 0;
-      for (const match of html.matchAll(pattern)) {
-        urls.add(match[1]);
+    WRAPPER_PATTERN.lastIndex = 0;
+    for (const wrapperMatch of html.matchAll(WRAPPER_PATTERN)) {
+      const inner = wrapperMatch[2];
+      GITHUB_URL_PATTERN.lastIndex = 0;
+      for (const linkMatch of inner.matchAll(GITHUB_URL_PATTERN)) {
+        urls.add(linkMatch[1]);
       }
     }
   }
@@ -208,7 +208,11 @@ export function buildSourceMap(docsDir: string): Map<string, string> {
         if (relative.endsWith("/index") || relative === "index") {
           relative = relative.slice(0, -"/index".length) || ".";
         }
-        map.set(relative, fullPath);
+        const stripped = relative
+          .split("/")
+          .map((seg) => seg.replace(NUMERIC_PREFIX_PATTERN, ""))
+          .join("/");
+        map.set(stripped, fullPath);
       }
     }
   }
@@ -358,25 +362,21 @@ export async function resolveSourceContent(
 export function replaceGithubCodeblocks(html: string, resolved: Map<string, string>): string {
   WRAPPER_PATTERN.lastIndex = 0;
   return html.replace(WRAPPER_PATTERN, (match, _open, inner: string) => {
-    for (const pattern of GITHUB_LINK_PATTERNS) {
-      pattern.lastIndex = 0;
-      const linkMatch = pattern.exec(inner);
-      if (!linkMatch) {
-        continue;
-      }
-
-      const githubUrl = linkMatch[1];
-      const code = resolved.get(githubUrl);
-      if (!code) {
-        break;
-      }
-
-      const ref = parseGithubRef(githubUrl);
-      const lang = ref ? extToLanguage(ref.rawUrl) : "";
-      const escaped = code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      return `<pre class="prism-code language-${lang}"><code>${escaped}</code></pre>`;
+    GITHUB_URL_PATTERN.lastIndex = 0;
+    const linkMatch = GITHUB_URL_PATTERN.exec(inner);
+    if (!linkMatch) {
+      return match;
     }
 
-    return match;
+    const githubUrl = linkMatch[1];
+    const code = resolved.get(githubUrl);
+    if (!code) {
+      return match;
+    }
+
+    const ref = parseGithubRef(githubUrl);
+    const lang = ref ? extToLanguage(ref.rawUrl) : "";
+    const escaped = code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return `<pre class="prism-code language-${lang}"><code>${escaped}</code></pre>`;
   });
 }
