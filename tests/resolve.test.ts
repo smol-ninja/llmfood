@@ -8,10 +8,10 @@ import {
   extractRemoteUrls,
   fetchAllGithubCode,
   findSourceForUrl,
+  injectMermaidBlocks,
   parseGithubRef,
   replaceGithubCodeblocks,
   replaceLoadingContent,
-  replaceMermaidSvgs,
   resolveSourceContent,
   scanGithubRefs,
 } from "../src/resolve.js";
@@ -144,6 +144,18 @@ describe("scanGithubRefs", () => {
     expect(refs).toEqual([
       "https://github.com/sablier-labs/evm-monorepo/blob/main/misc/examples/lockup/LockupLinearStreamCreator.sol",
     ]);
+  });
+
+  it("matches wrapper div with unquoted class attribute", () => {
+    writePage(
+      "docs/test",
+      `<div class=docusaurus-theme-github-codeblock>
+        <pre><code>loading...</code></pre>
+        <a href=https://github.com/org/repo/blob/main/file.sol target=_blank class="">link</a>
+      </div></div></div>`
+    );
+    const refs = scanGithubRefs(buildDir, ["/docs/test"]);
+    expect(refs).toEqual(["https://github.com/org/repo/blob/main/file.sol"]);
   });
 
   it("ignores GitHub links outside codeblock wrappers", () => {
@@ -550,42 +562,70 @@ describe("extractRemoteUrls", () => {
       expect(extractRemoteUrls(source)).toEqual([]);
     }
   });
-});
 
-describe("replaceMermaidSvgs", () => {
-  it("replaces mermaid SVGs with fenced code blocks", () => {
-    const html =
-      '<article><svg id="mermaid-123" xmlns="http://www.w3.org/2000/svg"><g></g></svg></article>';
-    const result = replaceMermaidSvgs(html, ["graph TD\n  A --> B"]);
-    expect(result).toContain("language-mermaid");
-    expect(result).toContain("graph TD");
-    expect(result).not.toContain("<svg");
+  it("resolves JSX expressions via resolveRemoteUrl", () => {
+    const source = '<RemoteGFMContent url={getBenchmarkURL("results/lockup/batch.md")} />';
+    const resolver = (expr: string) => {
+      const match = expr.match(/getBenchmarkURL\("([^"]+)"\)/);
+      if (match) {
+        return `https://raw.githubusercontent.com/org/benchmarks/main/${match[1]}`;
+      }
+      return undefined;
+    };
+    const urls = extractRemoteUrls(source, resolver);
+    expect(urls).toEqual([
+      "https://raw.githubusercontent.com/org/benchmarks/main/results/lockup/batch.md",
+    ]);
   });
 
-  it("matches SVGs with aria-roledescription", () => {
-    const html =
-      '<svg aria-roledescription="flowchart" xmlns="http://www.w3.org/2000/svg"><g></g></svg>';
-    const result = replaceMermaidSvgs(html, ["flowchart LR\n  A --> B"]);
-    expect(result).toContain("flowchart LR");
+  it("skips JSX expressions when no resolver provided", () => {
+    const source = '<RemoteGFMContent url={getBenchmarkURL("results/file.md")} />';
+    expect(extractRemoteUrls(source)).toEqual([]);
+  });
+
+  it("skips JSX expressions that resolve to unsafe URLs", () => {
+    const source = '<C url={getUrl("file.md")} />';
+    const resolver = () => "http://insecure.com/file.md";
+    expect(extractRemoteUrls(source, resolver)).toEqual([]);
+  });
+
+  it("skips JSX expressions that resolve to undefined", () => {
+    const source = '<C url={unknownFn("file.md")} />';
+    const resolver = () => undefined;
+    expect(extractRemoteUrls(source, resolver)).toEqual([]);
+  });
+});
+
+describe("injectMermaidBlocks", () => {
+  it("injects mermaid code blocks before </article>", () => {
+    const html = "<article><p>Content</p></article>";
+    const result = injectMermaidBlocks(html, ["graph TD\n  A --> B"]);
+    expect(result).toContain("language-mermaid");
+    expect(result).toContain("graph TD");
+    expect(result).toContain("</article>");
   });
 
   it("returns unchanged HTML when no mermaid blocks", () => {
-    const html = '<svg id="mermaid-1"><g></g></svg>';
-    expect(replaceMermaidSvgs(html, [])).toBe(html);
+    const html = "<article><p>Content</p></article>";
+    expect(injectMermaidBlocks(html, [])).toBe(html);
   });
 
-  it("returns empty string for overflow SVGs", () => {
-    const html = '<svg id="mermaid-1"><g></g></svg><svg id="mermaid-2"><g></g></svg>';
-    const result = replaceMermaidSvgs(html, ["only one"]);
-    expect(result).toContain("only one");
-    expect(result).not.toContain("mermaid-2");
+  it("returns unchanged HTML when no article tag", () => {
+    const html = "<div><p>Content</p></div>";
+    expect(injectMermaidBlocks(html, ["graph TD"])).toBe(html);
   });
 
-  it("replaces multiple SVGs in order", () => {
-    const html = '<svg id="mermaid-1"><g></g></svg><p>gap</p><svg id="mermaid-2"><g></g></svg>';
-    const result = replaceMermaidSvgs(html, ["graph A", "graph B"]);
+  it("injects multiple mermaid blocks", () => {
+    const html = "<article><p>Content</p></article>";
+    const result = injectMermaidBlocks(html, ["graph A", "graph B"]);
     expect(result).toContain("graph A");
     expect(result).toContain("graph B");
+  });
+
+  it("escapes HTML entities in mermaid source", () => {
+    const html = "<article><p>Content</p></article>";
+    const result = injectMermaidBlocks(html, ["A -->|x < 10| B"]);
+    expect(result).toContain("&lt;");
   });
 });
 

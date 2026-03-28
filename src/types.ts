@@ -17,6 +17,7 @@ export type LlmfoodConfig = {
   ignorePatterns?: RegExp[];
   postProcessHtml?: (html: string, context: ProcessContext) => string | Promise<string>;
   postProcessMarkdown?: (markdown: string, context: ProcessContext) => string | Promise<string>;
+  resolveRemoteUrl?: (expression: string) => string | undefined;
   rootContent?: string;
   sectionLabels?: Record<string, string>;
   sectionOrder?: string[];

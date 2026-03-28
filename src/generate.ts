@@ -5,9 +5,9 @@ import { htmlToMarkdown } from "./convert.js";
 import type { SourcePageData } from "./resolve.js";
 import {
   fetchAllGithubCode,
+  injectMermaidBlocks,
   replaceGithubCodeblocks,
   replaceLoadingContent,
-  replaceMermaidSvgs,
   resolveSourceContent,
   scanGithubRefs,
 } from "./resolve.js";
@@ -88,7 +88,7 @@ async function processPage(
     html = replaceGithubCodeblocks(html, resolvedCode);
   }
   if (sourceData) {
-    html = replaceMermaidSvgs(html, sourceData.mermaidBlocks);
+    html = injectMermaidBlocks(html, sourceData.mermaidBlocks);
     html = replaceLoadingContent(html, sourceData.resolvedRemoteContent);
   }
 
@@ -262,7 +262,7 @@ export async function generateLlmsMarkdown(config: LlmfoodConfig): Promise<void>
 
   let sourceContent: Map<string, SourcePageData> | undefined;
   if (config.docsDir) {
-    sourceContent = await resolveSourceContent(config.docsDir, urlPaths);
+    sourceContent = await resolveSourceContent(config.docsDir, urlPaths, config.resolveRemoteUrl);
     if (sourceContent.size > 0) {
       const mermaidCount = [...sourceContent.values()].reduce(
         (sum, d) => sum + d.mermaidBlocks.length,

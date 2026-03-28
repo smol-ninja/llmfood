@@ -9,14 +9,13 @@ const FENCED_MERMAID_PATTERN = /```mermaid\n([\s\S]*?)```/g;
 const LEADING_WHITESPACE_PATTERN = /^\s+/;
 const LOADING_CONTENT_PATTERN =
   /(<(?:div|p|section)[^>]*>)\s*Loading content\.\.\.\s*(<\/(?:div|p|section)>)/g;
-const MERMAID_SVG_PATTERN =
-  /<svg[^>]*(?:id="[^"]*mermaid|aria-roledescription)[^>]*>[\s\S]*?<\/svg>/g;
 const PRIVATE_HOST_PATTERN =
   /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|0\.)/;
 const REMOTE_URL_PATTERN = /url=["'](https?:\/\/[^"']+)["']/g;
+const REMOTE_JSX_PATTERN = /url=\{([^}]+)\}/g;
 const SOURCE_EXTENSIONS = [".md", ".mdx"];
 const WRAPPER_PATTERN =
-  /(<div[^>]*class="[^"]*docusaurus-theme-github-codeblock[^"]*"[^>]*>)([\s\S]*?)(<\/div>\s*<\/div>\s*<\/div>)/g;
+  /(<div[^>]*class=["']?[^"'>]*docusaurus-theme-github-codeblock[^"'>]*["']?[^>]*>)([\s\S]*?)(<\/div>\s*<\/div>\s*<\/div>)/g;
 
 const EXT_TO_LANGUAGE: Record<string, string> = {
   bash: "bash",
@@ -261,8 +260,12 @@ function isSafeRemoteUrl(rawUrl: string): boolean {
   }
 }
 
-export function extractRemoteUrls(source: string): string[] {
+export function extractRemoteUrls(
+  source: string,
+  resolveRemoteUrl?: (expression: string) => string | undefined
+): string[] {
   const urls: string[] = [];
+
   REMOTE_URL_PATTERN.lastIndex = 0;
   for (const match of source.matchAll(REMOTE_URL_PATTERN)) {
     const url = match[1];
@@ -270,24 +273,38 @@ export function extractRemoteUrls(source: string): string[] {
       urls.push(url);
     }
   }
+
+  if (resolveRemoteUrl) {
+    REMOTE_JSX_PATTERN.lastIndex = 0;
+    for (const match of source.matchAll(REMOTE_JSX_PATTERN)) {
+      const resolved = resolveRemoteUrl(match[1]);
+      if (resolved && isSafeRemoteUrl(resolved)) {
+        urls.push(resolved);
+      }
+    }
+  }
+
   return urls;
 }
 
-export function replaceMermaidSvgs(html: string, mermaidBlocks: string[]): string {
+export function injectMermaidBlocks(html: string, mermaidBlocks: string[]): string {
   if (mermaidBlocks.length === 0) {
     return html;
   }
 
-  let blockIndex = 0;
-  MERMAID_SVG_PATTERN.lastIndex = 0;
-  return html.replace(MERMAID_SVG_PATTERN, () => {
-    if (blockIndex >= mermaidBlocks.length) {
-      return "";
-    }
-    const source = mermaidBlocks[blockIndex++];
-    const escaped = source.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    return `<pre class="prism-code language-mermaid"><code>${escaped}</code></pre>`;
-  });
+  const injection = mermaidBlocks
+    .map((block) => {
+      const escaped = block.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      return `<pre class="prism-code language-mermaid"><code>${escaped}</code></pre>`;
+    })
+    .join("\n");
+
+  const closeTag = "</article>";
+  const idx = html.lastIndexOf(closeTag);
+  if (idx === -1) {
+    return html;
+  }
+  return `${html.slice(0, idx)}${injection}${html.slice(idx)}`;
 }
 
 export function replaceLoadingContent(html: string, remoteContents: string[]): string {
@@ -307,7 +324,8 @@ export function replaceLoadingContent(html: string, remoteContents: string[]): s
 
 export async function resolveSourceContent(
   docsDir: string,
-  urlPaths: string[]
+  urlPaths: string[],
+  resolveRemoteUrl?: (expression: string) => string | undefined
 ): Promise<Map<string, SourcePageData>> {
   const sourceMap = buildSourceMap(docsDir);
   const result = new Map<string, SourcePageData>();
@@ -322,7 +340,7 @@ export async function resolveSourceContent(
 
     const source = fs.readFileSync(sourcePath, "utf-8");
     const mermaidBlocks = extractMermaidBlocks(source);
-    const remoteUrls = extractRemoteUrls(source);
+    const remoteUrls = extractRemoteUrls(source, resolveRemoteUrl);
 
     if (mermaidBlocks.length === 0 && remoteUrls.length === 0) {
       continue;
