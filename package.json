@@ -1,7 +1,7 @@
 {
   "name": "llmfood",
   "description": "Generate LLM-friendly Markdown from Docusaurus HTML builds",
-  "version": "1.0.0-beta.4",
+  "version": "1.0.0-beta.5",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
