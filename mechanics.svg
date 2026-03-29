@@ -42,19 +42,12 @@
   <rect x="100" y="294" width="700" height="130" rx="10" fill="#1a2332" stroke="#f59e0b" stroke-width="1.5"/>
   <text x="120" y="318" fill="#fcd34d" font-size="13" font-weight="700">2. Resolve External Content</text>
 
-  <!-- GitHub refs -->
-  <rect x="120" y="332" width="310" height="76" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1"/>
-  <text x="135" y="352" fill="#e2e8f0" font-size="11" font-weight="600">HTML-based (no config needed)</text>
-  <text x="135" y="370" fill="#94a3b8" font-size="10">Scan HTML for githubLink anchors</text>
-  <text x="135" y="386" fill="#94a3b8" font-size="10">Fetch code from raw.githubusercontent.com</text>
-  <text x="135" y="402" fill="#64748b" font-size="10">Resolves "loading..." code blocks</text>
-
-  <!-- Source-based -->
-  <rect x="470" y="332" width="310" height="76" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1"/>
-  <text x="485" y="352" fill="#e2e8f0" font-size="11" font-weight="600">Source-based (requires docsDir)</text>
-  <text x="485" y="370" fill="#94a3b8" font-size="10">Extract mermaid blocks from .md/.mdx source</text>
-  <text x="485" y="386" fill="#94a3b8" font-size="10">Extract remote URLs, fetch content</text>
-  <text x="485" y="402" fill="#64748b" font-size="10">Resolves mermaid SVGs + "Loading content..."</text>
+  <!-- Source scanning -->
+  <rect x="120" y="332" width="660" height="76" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+  <text x="135" y="352" fill="#e2e8f0" font-size="11" font-weight="600">Source-based scanning (requires docsDir)</text>
+  <text x="135" y="370" fill="#94a3b8" font-size="10">Extract GitHub CodeBlock refs → fetch from raw.githubusercontent.com → resolves "loading..." blocks</text>
+  <text x="135" y="386" fill="#94a3b8" font-size="10">Extract mermaid blocks from .md/.mdx → inject into HTML (client-side renders leave no trace)</text>
+  <text x="135" y="402" fill="#64748b" font-size="10">Extract remote URLs → fetch content → resolves "Loading content..." · Inlines imported MDX snippets</text>
 
   <!-- Arrow 3→4 -->
   <line x1="450" y1="424" x2="450" y2="454" stroke="#6366f1" stroke-width="1.5" marker-end="url(#arrow)"/>
@@ -78,7 +71,7 @@
   <!-- Sub-step: Apply Resolvers -->
   <rect x="100" y="632" width="700" height="56" rx="8" fill="#1e293b" stroke="#f59e0b" stroke-width="1"/>
   <text x="120" y="655" fill="#fcd34d" font-size="12" font-weight="600">3b. Apply Content Resolvers</text>
-  <text x="120" y="674" fill="#64748b" font-size="10">Replace GitHub code placeholders → Replace mermaid SVGs → Replace "Loading content..."</text>
+  <text x="120" y="674" fill="#64748b" font-size="10">Replace GitHub code placeholders → Inject mermaid blocks → Replace "Loading content..."</text>
 
   <!-- Arrow -->
   <line x1="450" y1="688" x2="450" y2="714" stroke="#6366f1" stroke-width="1.5" marker-end="url(#arrow)"/>
