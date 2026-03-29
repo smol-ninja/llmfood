@@ -9,6 +9,7 @@ import {
   extractRemoteUrls,
   findSourceForUrl,
   injectMermaidBlocks,
+  inlineImportedSnippets,
   parseGithubRef,
   replaceGithubCodeblocks,
   replaceLoadingContent,
@@ -111,6 +112,58 @@ https://github.com/org/repo/blob/main/schema.graphql
 
   it("returns empty array when no refs found", () => {
     expect(extractGithubRefs("# Just a title\nSome text\n")).toEqual([]);
+  });
+});
+
+describe("inlineImportedSnippets", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "llmfood-inline-test-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { force: true, recursive: true });
+  });
+
+  it("appends content from imported .mdx files", () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "_snippet.mdx"),
+      `<CodeBlock language="solidity" metastring={\`reference title=""\`}>
+  {\`https://github.com/org/repo/blob/main/snippet.sol\`}
+</CodeBlock>`
+    );
+
+    const source = `import Snippet from "./_snippet.mdx"\n\n<Snippet />`;
+    const result = inlineImportedSnippets(source, tmpDir);
+    expect(result).toContain("snippet.sol");
+  });
+
+  it("handles multiple imports", () => {
+    fs.writeFileSync(path.join(tmpDir, "_a.mdx"), "content A");
+    fs.writeFileSync(path.join(tmpDir, "_b.mdx"), "content B");
+
+    const source = `import A from "./_a.mdx"\nimport B from "./_b.mdx"`;
+    const result = inlineImportedSnippets(source, tmpDir);
+    expect(result).toContain("content A");
+    expect(result).toContain("content B");
+  });
+
+  it("ignores non-relative imports", () => {
+    const source = `import Comp from "@site/components/Comp.mdx"`;
+    const result = inlineImportedSnippets(source, tmpDir);
+    expect(result).toBe(source);
+  });
+
+  it("ignores missing snippet files", () => {
+    const source = `import Missing from "./missing.mdx"`;
+    const result = inlineImportedSnippets(source, tmpDir);
+    expect(result).toBe(source);
+  });
+
+  it("returns source unchanged when no imports", () => {
+    const source = "# Title\nSome content\n";
+    expect(inlineImportedSnippets(source, tmpDir)).toBe(source);
   });
 });
 

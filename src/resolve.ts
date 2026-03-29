@@ -5,6 +5,8 @@ const CODEBLOCK_JSX_PATTERN = /\{\s*`\s*(https:\/\/github\.com\/[^`\s]+)\s*`\s*\
 const CODEBLOCK_FENCED_PATTERN =
   /```\w+\s+reference\s+title="[^"]*"\s*\n\s*(https:\/\/github\.com\/\S+)\s*\n```/g;
 
+const MDX_IMPORT_PATTERN = /^import\s+\w+\s+from\s+["']([^"']+\.mdx?)["']/gm;
+
 const DOC_EXTENSION_PATTERN = /\.(mdx?|md)$/;
 const NUMERIC_PREFIX_PATTERN = /^\d+-/;
 const FENCED_MERMAID_PATTERN = /```mermaid\n([\s\S]*?)```/g;
@@ -144,6 +146,24 @@ async function withConcurrencyLimit<T>(
 
   await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, () => worker()));
   return results;
+}
+
+export function inlineImportedSnippets(source: string, sourceDir: string): string {
+  const imports: string[] = [];
+  for (const match of source.matchAll(MDX_IMPORT_PATTERN)) {
+    const importPath = match[1];
+    if (!importPath.startsWith(".")) {
+      continue;
+    }
+    const resolved = path.resolve(sourceDir, importPath);
+    if (fs.existsSync(resolved)) {
+      imports.push(fs.readFileSync(resolved, "utf-8"));
+    }
+  }
+  if (imports.length === 0) {
+    return source;
+  }
+  return `${source}\n${imports.join("\n")}`;
 }
 
 export function extractGithubRefs(source: string): string[] {
@@ -344,7 +364,8 @@ export async function resolveSourceContent(
       continue;
     }
 
-    const source = fs.readFileSync(sourcePath, "utf-8");
+    const rawSource = fs.readFileSync(sourcePath, "utf-8");
+    const source = inlineImportedSnippets(rawSource, path.dirname(sourcePath));
     const mermaidBlocks = extractMermaidBlocks(source);
     const githubUrls = extractGithubRefs(source);
     const remoteUrls = extractRemoteUrls(source, resolveRemoteUrl);
