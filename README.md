@@ -93,17 +93,17 @@ const markdown = htmlToMarkdown(docusaurusHtmlString);
 ## Content Resolution
 
 Some Docusaurus plugins render content client-side, so the static HTML contains placeholders instead of real content.
-llmfood automatically detects and resolves these:
+When `docsDir` is set, llmfood scans MDX source files and resolves these automatically:
 
-| Pattern                               | Detection                                                         | Resolution                                                         |
-| ------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------ |
-| GitHub code references                | `<a class="githubLink">` from `docusaurus-theme-github-codeblock` | Extracts GitHub URL, fetches code from `raw.githubusercontent.com` |
-| Remote content ("Loading content...") | `url="..."` in MDX source files (requires `docsDir`)              | Fetches remote markdown content                                    |
-| Mermaid diagrams                      | ` ```mermaid ` blocks in MDX source files (requires `docsDir`)    | Injects mermaid source before SVG stripping                        |
-| YouTube embeds                        | `<iframe>` with YouTube URL                                       | Converts to `[title](youtube-url)` markdown link                   |
+| Pattern                | Source detection                                 | Resolution                                                        |
+| ---------------------- | ------------------------------------------------ | ----------------------------------------------------------------- |
+| GitHub code references | `CodeBlock` JSX and fenced ` ```lang reference ` | Fetches code from `raw.githubusercontent.com` with line ranges    |
+| Remote content         | `url="..."` or `url={expr}` in MDX               | Fetches remote markdown (JSX expressions via `resolveRemoteUrl`)  |
+| Mermaid diagrams       | ` ```mermaid ` blocks in MDX                     | Injects mermaid source into HTML (client-side renders leave none) |
+| YouTube embeds         | `<iframe>` with YouTube URL in HTML              | Converts to `[title](youtube-url)` markdown link                  |
 
-GitHub code references are resolved from HTML alone. Remote content and mermaid resolution require the `docsDir` config
-option (set automatically by the Docusaurus plugin).
+Source scanning also resolves imported MDX snippets (`import Foo from "./_snippet.mdx"`) and matches files by
+frontmatter `id` when the slug differs from the filename.
 
 All external fetches run in parallel with a concurrency limit of 6.
 
@@ -124,6 +124,7 @@ Processes an entire Docusaurus build and generates `llms.txt` plus any custom fi
 | `ignorePatterns`      | `RegExp[]`                  | No       | URL patterns to exclude (root `/` is always excluded)                       |
 | `postProcessHtml`     | `(html, context) => string` | No       | Hook to transform HTML before markdown conversion                           |
 | `postProcessMarkdown` | `(md, context) => string`   | No       | Hook to transform markdown after conversion                                 |
+| `resolveRemoteUrl`    | `(expr) => string`          | No       | Resolve JSX expressions (e.g., `getBenchmarkURL(...)`) to fetch URLs        |
 | `rootContent`         | `string`                    | No       | Additional content to include at the top of `llms.txt`                      |
 | `sectionLabels`       | `Record<string, string>`    | No       | Custom display labels for URL sections                                      |
 | `sectionOrder`        | `string[]`                  | No       | Ordering for sections in `llms.txt`                                         |
@@ -192,8 +193,6 @@ Set `verbose: true` to see individual skipped pages in the output.
 - **No incremental builds** — re-processes all pages on every run
 - **Single `<article>` assumption** — only the first `<article>` tag is processed
 - **Regex-based stripping** — may break if Docusaurus changes its class naming conventions across major versions
-- **GitHub code resolution** — requires `showGithubLink: true` in `docusaurus-theme-github-codeblock` config (the
-  default) so the GitHub URL is present in the HTML
 
 ## Development
 
