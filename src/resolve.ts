@@ -8,6 +8,7 @@ const CODEBLOCK_FENCED_PATTERN =
 const MDX_IMPORT_PATTERN = /^import\s+\w+\s+from\s+["']([^"']+\.mdx?)["']/gm;
 
 const DOC_EXTENSION_PATTERN = /\.(mdx?|md)$/;
+const FRONTMATTER_ID_PATTERN = /^---\s*\n[\s\S]*?^id:\s*["']([^"'\n]+)["']/m;
 const NUMERIC_PREFIX_PATTERN = /^\d+-/;
 const FENCED_MERMAID_PATTERN = /```mermaid\n([\s\S]*?)```/g;
 const LEADING_WHITESPACE_PATTERN = /^\s+/;
@@ -186,34 +187,50 @@ export type SourcePageData = {
   resolvedRemoteContent: string[];
 };
 
-export function buildSourceMap(docsDir: string): Map<string, string> {
-  const map = new Map<string, string>();
+function extractFrontmatterId(filePath: string): string | undefined {
+  const content = fs.readFileSync(filePath, "utf-8");
+  return content.match(FRONTMATTER_ID_PATTERN)?.[1];
+}
 
-  function walk(dir: string): void {
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        walk(fullPath);
-      } else if (SOURCE_EXTENSIONS.some((ext) => entry.name.endsWith(ext))) {
-        let relative = path.relative(docsDir, fullPath);
-        relative = relative.replace(DOC_EXTENSION_PATTERN, "");
-        if (relative.endsWith("/index") || relative === "index") {
-          relative = relative.slice(0, -"/index".length) || ".";
-        }
-        const stripped = relative
-          .split("/")
-          .map((seg) => seg.replace(NUMERIC_PREFIX_PATTERN, ""))
-          .join("/");
-        map.set(stripped, fullPath);
-      }
+function sourceMapKey(docsDir: string, fullPath: string): string {
+  let relative = path.relative(docsDir, fullPath);
+  relative = relative.replace(DOC_EXTENSION_PATTERN, "");
+  if (relative.endsWith("/index") || relative === "index") {
+    relative = relative.slice(0, -"/index".length) || ".";
+  }
+  return relative
+    .split("/")
+    .map((seg) => seg.replace(NUMERIC_PREFIX_PATTERN, ""))
+    .join("/");
+}
+
+function walkSourceFiles(dir: string, docsDir: string, map: Map<string, string>): void {
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      walkSourceFiles(fullPath, docsDir, map);
+      continue;
+    }
+    if (!SOURCE_EXTENSIONS.some((ext) => entry.name.endsWith(ext))) {
+      continue;
+    }
+    const key = sourceMapKey(docsDir, fullPath);
+    map.set(key, fullPath);
+
+    const id = extractFrontmatterId(fullPath);
+    if (id) {
+      const parentDir = key.includes("/") ? key.slice(0, key.lastIndexOf("/")) : "";
+      map.set(parentDir ? `${parentDir}/${id}` : id, fullPath);
     }
   }
+}
 
+export function buildSourceMap(docsDir: string): Map<string, string> {
+  const map = new Map<string, string>();
   if (fs.existsSync(docsDir)) {
-    walk(docsDir);
+    walkSourceFiles(docsDir, docsDir, map);
   }
-
   return map;
 }
 

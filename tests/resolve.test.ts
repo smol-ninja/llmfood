@@ -298,6 +298,30 @@ describe("buildSourceMap", () => {
     expect(map.has("guides/erc20-setup")).toBe(true);
   });
 
+  it("maps by frontmatter id when it differs from filename", () => {
+    writeSource(
+      "guides/flow/examples/02-calculate-rps.mdx",
+      '---\nid: "flow-calculate-rps"\n---\n\n# Calculate RPS\n'
+    );
+    const map = buildSourceMap(docsDir);
+    expect(map.has("guides/flow/examples/calculate-rps")).toBe(true);
+    expect(map.has("guides/flow/examples/flow-calculate-rps")).toBe(true);
+  });
+
+  it("maps root-level file by frontmatter id", () => {
+    writeSource("03-fee.md", '---\nid: "fees"\n---\n\n# Fees\n');
+    const map = buildSourceMap(docsDir);
+    expect(map.has("fee")).toBe(true);
+    expect(map.has("fees")).toBe(true);
+  });
+
+  it("does not add id entry when frontmatter has no id", () => {
+    writeSource("guides/plain.md", '---\ntitle: "Plain"\n---\n\n# Plain\n');
+    const map = buildSourceMap(docsDir);
+    expect(map.has("guides/plain")).toBe(true);
+    expect(map.size).toBe(1);
+  });
+
   it("returns empty map for nonexistent dir", () => {
     expect(buildSourceMap("/nonexistent")).toEqual(new Map());
   });
