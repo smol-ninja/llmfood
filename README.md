@@ -1,5 +1,8 @@
 # llmfood
 
+[![CI](https://github.com/smol-ninja/llmfood/actions/workflows/ci.yml/badge.svg)](https://github.com/smol-ninja/llmfood/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/llmfood.svg)](https://www.npmjs.com/package/llmfood)
+
 Generate LLM-friendly Markdown from [Docusaurus](https://docusaurus.io/) HTML builds, implementing the
 [llms.txt](https://llmstxt.org/) convention.
 
@@ -165,68 +168,8 @@ The converter handles these Docusaurus-specific elements:
 - **YouTube iframes** — converts to markdown links with video title
 - **Mermaid code blocks** — preserves as fenced mermaid code blocks (when source is available)
 
-The following Docusaurus chrome is automatically stripped:
-
-- Breadcrumb navigation
-- Table of contents sidebar
-- Hash links / anchor links
-- Pagination navigation
-- Document footer
-- CSS-in-JS styled spans
-- Style tags
-- SVG elements
-
-## Skip Reporting
-
-Pages that can't be converted are tracked and reported:
-
-- **redirect** — meta-refresh redirect pages (with target URL)
-- **empty** — pages with no extractable content
-- **no-file** — missing HTML files
-- **error** — pages that threw during processing
-
-Set `verbose: true` to see individual skipped pages in the output.
-
-## Limitations
-
-- **Docusaurus-only** — tightly coupled to Docusaurus HTML class names and structure
-- **No incremental builds** — re-processes all pages on every run
-- **Single `<article>` assumption** — only the first `<article>` tag is processed
-- **Regex-based stripping** — may break if Docusaurus changes its class naming conventions across major versions
-
-## Development
-
-### Prerequisites
-
-- [Node.js](https://nodejs.org/) v20+
-- [Bun](https://bun.sh/)
-
-### Setup
-
-```bash
-git clone https://github.com/smol-ninja/llmfood.git
-cd llmfood
-bun install
-```
-
-### Commands
-
-```bash
-bun run build          # Build the package
-bun run test           # Run tests
-bun run test:coverage  # Run tests with coverage
-bun run test:watch     # Run tests in watch mode
-bun run check          # Run all code checks (biome, prettier, types)
-bun run fix            # Auto-fix linting and formatting
-```
-
-### Code Quality
-
-- **Linting & formatting** — [Biome](https://biomejs.dev/) for JS/TS/JSON, [Prettier](https://prettier.io/) for
-  Markdown/YAML
-- **Pre-commit hooks** — [Husky](https://typicode.github.io/husky/) +
-  [lint-staged](https://github.com/lint-staged/lint-staged)
-- **Testing** — [Vitest](https://vitest.dev/) with V8 coverage
+Pages that can't be converted are tracked and summarized. Set `verbose: true` to see individual skipped pages with
+reasons (redirects, empty pages, missing files, errors).
 
 ## License
 

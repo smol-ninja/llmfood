@@ -393,6 +393,10 @@ describe("extractRemoteUrls", () => {
       '<C url="https://10.0.0.1/internal" />',
       '<C url="https://192.168.1.1/internal" />',
       '<C url="https://169.254.169.254/latest/meta-data/" />',
+      '<C url="https://[::1]/secret" />',
+      '<C url="https://[::ffff:127.0.0.1]/secret" />',
+      '<C url="https://[fe80::1]/secret" />',
+      '<C url="https://[fd00::1]/secret" />',
     ];
     for (const source of cases) {
       expect(extractRemoteUrls(source)).toEqual([]);

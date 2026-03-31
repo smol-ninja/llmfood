@@ -2,28 +2,27 @@
 
 Instructions for AI agents working on this repository.
 
-## Project Overview
-
-llmfood is a TypeScript library that converts Docusaurus HTML builds into LLM-friendly Markdown, implementing the
-[llms.txt](https://llmstxt.org/) convention. It is published as an npm package.
-
 ## Architecture
 
 ```
 src/
-  index.ts     # Barrel exports (no logic)
-  types.ts     # Type definitions (no logic)
-  convert.ts   # HTML → Markdown engine (Turndown + custom rules)
-  generate.ts  # Orchestrator: page discovery, conversion, llms.txt generation
+  index.ts       # Barrel exports (no logic)
+  types.ts       # Type definitions (no logic)
+  convert.ts     # HTML → Markdown engine (Turndown + custom rules)
+  resolve.ts     # Content resolution: GitHub refs, remote content, mermaid, MDX snippets
+  generate.ts    # Orchestrator: page discovery, conversion, llms.txt generation
+  docusaurus.ts  # Docusaurus plugin (postBuild hook, auto-derives config from Docusaurus)
 ```
 
 ### Data Flow
 
 1. `generateLlmsMarkdown(config)` is the entry point
 2. It calls `discoverPages()` to recursively find all `index.html` files in the build directory
-3. For each page, `processPage()` reads the HTML and converts to Markdown
-4. `htmlToMarkdown()` uses Turndown with custom rules to convert the cleaned HTML to Markdown
-5. Finally, `generateLlmsTxt()` and `generateCustomLlmsFiles()` write the output files
+3. If `docsDir` is set, `resolve.ts` scans MDX source files and builds a source map, then fetches GitHub code refs,
+   remote content, and mermaid blocks in parallel (concurrency limit of 6)
+4. For each page, `processPage()` injects resolved content into the HTML, then converts to Markdown
+5. `htmlToMarkdown()` uses Turndown with custom rules to convert the cleaned HTML to Markdown
+6. Finally, `generateLlmsTxt()` and `generateCustomLlmsFiles()` write the output files
 
 ### Key Dependencies
 
@@ -70,6 +69,13 @@ GFM features (tables, strikethrough) are implemented as custom Turndown rules �
 3. Export it from `index.ts` if it's a new type
 4. Add tests in `tests/generate.test.ts`
 5. Document in `README.md`
+
+## Limitations
+
+- Tightly coupled to Docusaurus HTML class names and structure — not usable with other static site generators
+- Re-processes all pages on every run (no incremental builds)
+- Only the first `<article>` tag in the HTML is processed
+- Regex-based HTML stripping may break if Docusaurus changes class naming conventions across major versions
 
 ## Don'ts
 

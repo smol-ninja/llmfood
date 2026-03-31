@@ -15,7 +15,7 @@ const LEADING_WHITESPACE_PATTERN = /^\s+/;
 const LOADING_CONTENT_PATTERN =
   /(<(?:div|p|section)[^>]*>)\s*Loading content\.\.\.\s*(<\/(?:div|p|section)>)/g;
 const PRIVATE_HOST_PATTERN =
-  /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|0\.)/;
+  /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|0\.|\[::1\]|\[::ffff:|\[fc|\[fd|\[fe)/;
 const REMOTE_URL_PATTERN = /url=["'](https?:\/\/[^"']+)["']/g;
 const REMOTE_JSX_PATTERN = /url=\{([^}]+)\}/g;
 const SOURCE_EXTENSIONS = [".md", ".mdx"];
@@ -251,7 +251,6 @@ export function findSourceForUrl(
 
 export function extractMermaidBlocks(source: string): string[] {
   const blocks: string[] = [];
-  FENCED_MERMAID_PATTERN.lastIndex = 0;
   for (const match of source.matchAll(FENCED_MERMAID_PATTERN)) {
     blocks.push(match[1].trim());
   }
@@ -277,7 +276,6 @@ export function extractRemoteUrls(
 ): string[] {
   const urls: string[] = [];
 
-  REMOTE_URL_PATTERN.lastIndex = 0;
   for (const match of source.matchAll(REMOTE_URL_PATTERN)) {
     const url = match[1];
     if (isSafeRemoteUrl(url)) {
@@ -286,7 +284,6 @@ export function extractRemoteUrls(
   }
 
   if (resolveRemoteUrl) {
-    REMOTE_JSX_PATTERN.lastIndex = 0;
     for (const match of source.matchAll(REMOTE_JSX_PATTERN)) {
       const resolved = resolveRemoteUrl(match[1]);
       if (resolved && isSafeRemoteUrl(resolved)) {
@@ -324,7 +321,6 @@ export function replaceLoadingContent(html: string, remoteContents: string[]): s
   }
 
   let contentIndex = 0;
-  LOADING_CONTENT_PATTERN.lastIndex = 0;
   return html.replace(LOADING_CONTENT_PATTERN, (match, openTag: string, closeTag: string) => {
     if (contentIndex >= remoteContents.length) {
       return match;
@@ -431,7 +427,6 @@ export function replaceGithubCodeblocks(
   }
 
   let codeIndex = 0;
-  WRAPPER_PATTERN.lastIndex = 0;
   return html.replace(WRAPPER_PATTERN, (match) => {
     if (codeIndex >= resolvedCode.length) {
       return match;
