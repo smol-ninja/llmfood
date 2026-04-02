@@ -98,15 +98,15 @@ const markdown = htmlToMarkdown(docusaurusHtmlString);
 Some Docusaurus plugins render content client-side, so the static HTML contains placeholders instead of real content.
 When `docsDir` is set, llmfood scans MDX source files and resolves these automatically:
 
-| Pattern                | Source detection                                 | Resolution                                                        |
-| ---------------------- | ------------------------------------------------ | ----------------------------------------------------------------- |
-| GitHub code references | `CodeBlock` JSX and fenced ` ```lang reference ` | Fetches code from `raw.githubusercontent.com` with line ranges    |
-| Remote content         | `url="..."` or `url={expr}` in MDX               | Fetches remote markdown (JSX expressions via `resolveRemoteUrl`)  |
-| Mermaid diagrams       | ` ```mermaid ` blocks in MDX                     | Injects mermaid source into HTML (client-side renders leave none) |
-| YouTube embeds         | `<iframe>` with YouTube URL in HTML              | Converts to `[title](youtube-url)` markdown link                  |
+| Pattern                | Source detection                                                                                 | Resolution                                                        |
+| ---------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| GitHub code references | `CodeBlock` JSX, fenced ` ```lang reference `, and `children`/`src`/`srcUrl`/`source` attributes | Fetches code from `raw.githubusercontent.com` with line ranges    |
+| Remote content         | `url="..."` or `url={expr}` in MDX                                                               | Fetches remote markdown (JSX expressions via `resolveRemoteUrl`)  |
+| Mermaid diagrams       | ` ```mermaid ` blocks in MDX                                                                     | Injects mermaid source into HTML (client-side renders leave none) |
+| YouTube embeds         | `<iframe>` with YouTube URL in HTML                                                              | Converts to `[title](youtube-url)` markdown link                  |
 
-Source scanning also resolves imported MDX snippets (`import Foo from "./_snippet.mdx"`) and matches files by
-frontmatter `id` when the slug differs from the filename.
+Source scanning also resolves imported MDX snippets (`import Foo from "./_snippet.mdx"`), substitutes `${props.x}`
+expressions using caller prop values, and matches files by frontmatter `id` when the slug differs from the filename.
 
 All external fetches run in parallel with a concurrency limit of 6.
 
