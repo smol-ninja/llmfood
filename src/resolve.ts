@@ -4,8 +4,10 @@ import * as path from "node:path";
 const CODEBLOCK_JSX_PATTERN = /\{\s*`\s*(https:\/\/github\.com\/[^`\s]+)\s*`\s*\}\s*<\/CodeBlock>/g;
 const CODEBLOCK_FENCED_PATTERN =
   /```\w+\s+reference\s+title="[^"]*"\s*\n\s*(https:\/\/github\.com\/\S+)\s*\n```/g;
+const GITHUB_JSX_ATTR_PATTERN =
+  /(?:children|src|srcUrl|source)=(?:"(https:\/\/github\.com\/[^"]*\/blob\/[^"]+)"|[{]\s*`\s*(https:\/\/github\.com\/[^`]*\/blob\/[^`]+)\s*`\s*[}])/g;
 
-const MDX_IMPORT_PATTERN = /^import\s+\w+\s+from\s+["']([^"']+\.mdx?)["']/gm;
+const MDX_IMPORT_PATTERN = /^import\s+(\w+)\s+from\s+["']([^"']+\.mdx?)["']/gm;
 
 const DOC_EXTENSION_PATTERN = /\.(mdx?|md)$/;
 const FRONTMATTER_ID_PATTERN = /^---\s*\n[\s\S]*?^id:\s*["']([^"'\n]+)["']/m;
@@ -69,10 +71,9 @@ export function parseGithubRef(githubUrl: string): GithubRef | undefined {
   if (hash) {
     const lineParts = hash.split("-");
     fromLine = Number.parseInt(lineParts[0].slice(1), 10) - 1;
-    toLine =
-      lineParts.length > 1
-        ? Number.parseInt(lineParts[1].slice(1), 10) - 1
-        : Number.POSITIVE_INFINITY;
+    if (lineParts.length > 1) {
+      toLine = Number.parseInt(lineParts[1].slice(1), 10) - 1;
+    }
   }
 
   return {
@@ -82,20 +83,25 @@ export function parseGithubRef(githubUrl: string): GithubRef | undefined {
   };
 }
 
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 function extToLanguage(filePath: string): string {
   const ext = filePath.split(".").pop() ?? "";
   return EXT_TO_LANGUAGE[ext] ?? ext;
 }
 
 function dedent(lines: string[]): string {
-  const indent = lines.reduce((prev, line) => {
+  let minIndent = Number.POSITIVE_INFINITY;
+  for (const line of lines) {
     if (line.length === 0) {
-      return prev;
+      continue;
     }
     const spaces = line.match(LEADING_WHITESPACE_PATTERN);
-    return spaces ? Math.min(prev, spaces[0].length) : 0;
-  }, Number.POSITIVE_INFINITY);
-  const shift = indent === Number.POSITIVE_INFINITY ? 0 : indent;
+    minIndent = spaces ? Math.min(minIndent, spaces[0].length) : 0;
+  }
+  const shift = Number.isFinite(minIndent) ? minIndent : 0;
   return lines.map((line) => line.slice(shift)).join("\n");
 }
 
@@ -149,16 +155,55 @@ async function withConcurrencyLimit<T>(
   return results;
 }
 
+function extractJsxProps(source: string, componentName: string): Record<string, string> {
+  const props: Record<string, string> = {};
+  const jsxPattern = new RegExp(`<${componentName}\\s+([^>]*?)\\s*/?>`, "s");
+  const jsxMatch = source.match(jsxPattern);
+  if (!jsxMatch) {
+    return props;
+  }
+  for (const attrMatch of jsxMatch[1].matchAll(/(\w+)="([^"]*)"/g)) {
+    props[attrMatch[1]] = attrMatch[2];
+  }
+  return props;
+}
+
+function resolvePropsInSource(snippetSource: string, props: Record<string, string>): string {
+  if (Object.keys(props).length === 0) {
+    return snippetSource;
+  }
+  return snippetSource.replace(
+    /\$\{props\.(\w+)(?:\.(\w+)\(\))?\}/g,
+    (original, propName: string, method?: string) => {
+      const value = props[propName];
+      if (value === undefined) {
+        return original;
+      }
+      if (!method) {
+        return value;
+      }
+      if (method in String.prototype) {
+        // biome-ignore lint/suspicious/noExplicitAny: dynamic dispatch on string method by name
+        return String((value as any)[method]());
+      }
+      return original;
+    }
+  );
+}
+
 export function inlineImportedSnippets(source: string, sourceDir: string): string {
   const imports: string[] = [];
   for (const match of source.matchAll(MDX_IMPORT_PATTERN)) {
-    const importPath = match[1];
+    const componentName = match[1];
+    const importPath = match[2];
     if (!importPath.startsWith(".")) {
       continue;
     }
     const resolved = path.resolve(sourceDir, importPath);
     if (fs.existsSync(resolved)) {
-      imports.push(fs.readFileSync(resolved, "utf-8"));
+      const snippetSource = fs.readFileSync(resolved, "utf-8");
+      const props = extractJsxProps(source, componentName);
+      imports.push(resolvePropsInSource(snippetSource, props));
     }
   }
   if (imports.length === 0) {
@@ -168,13 +213,24 @@ export function inlineImportedSnippets(source: string, sourceDir: string): strin
 }
 
 export function extractGithubRefs(source: string): string[] {
+  const seen = new Set<string>();
   const urls: string[] = [];
 
+  function add(url: string): void {
+    if (!seen.has(url)) {
+      seen.add(url);
+      urls.push(url);
+    }
+  }
+
   for (const match of source.matchAll(CODEBLOCK_JSX_PATTERN)) {
-    urls.push(match[1]);
+    add(match[1]);
   }
   for (const match of source.matchAll(CODEBLOCK_FENCED_PATTERN)) {
-    urls.push(match[1]);
+    add(match[1]);
+  }
+  for (const match of source.matchAll(GITHUB_JSX_ATTR_PATTERN)) {
+    add(match[1] ?? match[2]);
   }
 
   return urls;
@@ -250,11 +306,7 @@ export function findSourceForUrl(
 }
 
 export function extractMermaidBlocks(source: string): string[] {
-  const blocks: string[] = [];
-  for (const match of source.matchAll(FENCED_MERMAID_PATTERN)) {
-    blocks.push(match[1].trim());
-  }
-  return blocks;
+  return [...source.matchAll(FENCED_MERMAID_PATTERN)].map((m) => m[1].trim());
 }
 
 function isSafeRemoteUrl(rawUrl: string): boolean {
@@ -302,7 +354,7 @@ export function injectMermaidBlocks(html: string, mermaidBlocks: string[]): stri
 
   const injection = mermaidBlocks
     .map((block) => {
-      const escaped = block.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const escaped = escapeHtml(block);
       return `<pre class="prism-code language-mermaid"><code>${escaped}</code></pre>`;
     })
     .join("\n");
@@ -438,7 +490,7 @@ export function replaceGithubCodeblocks(
 
     const ref = url ? parseGithubRef(url) : undefined;
     const lang = ref ? extToLanguage(ref.rawUrl) : "";
-    const escaped = code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const escaped = escapeHtml(code);
     return `<pre class="prism-code language-${lang}"><code>${escaped}</code></pre>`;
   });
 }

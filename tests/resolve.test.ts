@@ -113,6 +113,107 @@ https://github.com/org/repo/blob/main/schema.graphql
   it("returns empty array when no refs found", () => {
     expect(extractGithubRefs("# Just a title\nSome text\n")).toEqual([]);
   });
+
+  it("extracts URL from static children prop", () => {
+    const source = `<CodeBlock language="solidity" children="https://github.com/org/repo/blob/main/file.sol#L1-L5" />`;
+    expect(extractGithubRefs(source)).toEqual([
+      "https://github.com/org/repo/blob/main/file.sol#L1-L5",
+    ]);
+  });
+
+  it("extracts URL from static JSX attribute on any component", () => {
+    const source = `<MySnippet srcUrl="https://github.com/org/repo/blob/main/other.sol" />`;
+    expect(extractGithubRefs(source)).toEqual(["https://github.com/org/repo/blob/main/other.sol"]);
+  });
+
+  it("extracts URL from expression children prop with template literal", () => {
+    const source = `<CodeBlock language="solidity" children={\`https://github.com/org/repo/blob/main/file.sol\`} />`;
+    expect(extractGithubRefs(source)).toEqual(["https://github.com/org/repo/blob/main/file.sol"]);
+  });
+
+  it("ignores non-blob GitHub URLs", () => {
+    const source = `<Link href="https://github.com/org/repo/tree/main" />`;
+    expect(extractGithubRefs(source)).toEqual([]);
+  });
+
+  it("ignores blob URLs in navigation attributes like href", () => {
+    const source = `<a href="https://github.com/org/repo/blob/main/file.sol">link</a>`;
+    expect(extractGithubRefs(source)).toEqual([]);
+  });
+
+  it("ignores dynamic expressions that are not template literals", () => {
+    const source = `<CodeBlock language="solidity" children={props.srcUrl} />`;
+    expect(extractGithubRefs(source)).toEqual([]);
+  });
+
+  it("extracts URL even from malformed JSX", () => {
+    const source = `<CodeBlock language="solidity" children="https://github.com/org/repo/blob/main/file.sol"`;
+    expect(extractGithubRefs(source)).toEqual(["https://github.com/org/repo/blob/main/file.sol"]);
+  });
+
+  it("extracts URL from nested JSX element", () => {
+    const source = `<Tabs><TabItem><CodeBlock language="solidity" children="https://github.com/org/repo/blob/main/nested.sol" /></TabItem></Tabs>`;
+    expect(extractGithubRefs(source)).toEqual(["https://github.com/org/repo/blob/main/nested.sol"]);
+  });
+});
+
+describe("extractGithubRefs with inlined prop expressions", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "llmfood-props-test-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { force: true, recursive: true });
+  });
+
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: testing literal ${props.x} text
+  it("should not extract URLs containing unresolved ${props.x} expressions", () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "_snippet.mdx"),
+      `<CodeBlock language="solidity" showLineNumbers metastring={\`reference title=""\`}>
+  {\`https://github.com/sablier-labs/\${props.protocol.toLowerCase()}-integration-template/blob/main/src/\${props.protocol}StreamCreator.sol\`}
+</CodeBlock>`
+    );
+
+    const caller = `import Snippet from "./_snippet.mdx"\n\n<Snippet protocol="Flow" />`;
+    const inlined = inlineImportedSnippets(caller, tmpDir);
+    const refs = extractGithubRefs(inlined);
+
+    expect(refs).not.toEqual([
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: testing literal ${props.x} text
+      "https://github.com/sablier-labs/${props.protocol.toLowerCase()}-integration-template/blob/main/src/${props.protocol}StreamCreator.sol",
+    ]);
+  });
+
+  it("leaves unknown props unresolved", () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "_snippet.mdx"),
+      `<CodeBlock language="solidity" showLineNumbers metastring={\`reference title=""\`}>
+  {\`https://github.com/org/\${props.unknown}/blob/main/file.sol\`}
+</CodeBlock>`
+    );
+
+    const caller = `import Snippet from "./_snippet.mdx"\n\n<Snippet protocol="Flow" />`;
+    const inlined = inlineImportedSnippets(caller, tmpDir);
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: testing literal ${props.x} text
+    expect(inlined).toContain("${props.unknown}");
+  });
+
+  it("leaves unsupported methods unresolved", () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "_snippet.mdx"),
+      `<CodeBlock language="solidity" showLineNumbers metastring={\`reference title=""\`}>
+  {\`https://github.com/org/\${props.protocol.notAMethod()}/blob/main/file.sol\`}
+</CodeBlock>`
+    );
+
+    const caller = `import Snippet from "./_snippet.mdx"\n\n<Snippet protocol="Flow" />`;
+    const inlined = inlineImportedSnippets(caller, tmpDir);
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: testing literal ${props.x} text
+    expect(inlined).toContain("${props.protocol.notAMethod()}");
+  });
 });
 
 describe("inlineImportedSnippets", () => {
